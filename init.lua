@@ -10,7 +10,7 @@ vim.opt.tabstop = 2                -- Tab width
 vim.opt.shiftwidth = 2             -- Indent width
 vim.opt.expandtab = true           -- Use spaces instead of tabs
 vim.opt.smartindent = true         -- Smart autoindenting
-vim.opt.termguicolors = true       -- Use terminal colors
+vim.opt.termguicolors = false       -- Use terminal colors
 vim.opt.signcolumn = 'yes'         -- Always show sign column
 vim.opt.splitright = true          -- Vertical splits to the right
 vim.opt.splitbelow = true          -- Horizontal splits below
@@ -22,6 +22,3 @@ vim.opt.scrolloff = 8              -- Lines to keep above/below cursor
 vim.opt.sidescrolloff = 8          -- Columns to keep left/right of cursor
 vim.opt.cursorline = true          -- Highlight current line
 vim.opt.showmode = true            -- Show mode
-
-vim.cmd('highlight Normal guibg=NONE ctermbg=NONE')
-vim.cmd('highlight NonText guibg=NONE ctermbg=NONE')

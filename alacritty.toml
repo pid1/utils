@@ -1,0 +1,23 @@
+[font]
+size = 16.0
+
+[font.normal]
+family = "Atkinson Hyperlegible Mono"
+style = "Regular"
+
+[font.bold]
+family = "Atkinson Hyperlegible Mono"
+style = "Bold"
+
+[font.italic]
+family = "Atkinson Hyperlegible Mono"
+style = "Italic"
+
+[font.bold_italic]
+family = "Atkinson Hyperlegible Mono"
+style = "Bold Italic"
+
+[general]
+import = [
+    "~/.config/alacritty/themes/themes/github_light.toml"
+]

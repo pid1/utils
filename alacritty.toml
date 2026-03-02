@@ -1,5 +1,5 @@
 [font]
-size = 16.0
+size = 24.0
 
 [font.normal]
 family = "Atkinson Hyperlegible Mono"
@@ -19,5 +19,15 @@ style = "Bold Italic"
 
 [general]
 import = [
-    "~/.config/alacritty/themes/themes/github_light.toml"
+    "~/.config/alacritty/themes/themes/cytracom_light.toml"
 ]
+
+# Pass right-click through to tmux (instead of Alacritty handling it).
+# Hold Shift + right-click to bypass tmux and get native terminal behavior.
+[[mouse.bindings]]
+mouse  = "Right"
+action = "ReceiveChar"
+
+[[mouse.bindings]]
+mouse  = "Middle"
+action = "ReceiveChar"

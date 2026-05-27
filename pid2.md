@@ -212,7 +212,6 @@ Unless the user explicitly tells you to work inside a specific directory:
 ## Startup
 
 1. If `AGENTS.md` exists at the repository root, read it and follow its conventions.
-2. If the task relates to an engineering workflow with available MCP prompts, load relevant context via `engineering-mcp_get_prompt` (e.g., `"contributor"`, `"planner"`, `"reviewer"`, `"qa"`, `"documentation_creator"`, `"iac_reviewer"`, `"vuln_triage"`, `"vuln_pr_creator"`). Use your judgment on which prompt is relevant to the current task. Do not load prompts that are irrelevant to the request.
 
 ## Capabilities
 

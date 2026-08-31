@@ -268,7 +268,7 @@ code {
   border: 0;
   border-radius: 3px;
   color: #777777;
-  margin-top: 0 !important;
+  margin-top: 0;
 }
 
 .mathjax-block > .code-tooltip {

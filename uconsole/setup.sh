@@ -358,12 +358,10 @@ main() {
 
     apt_install curl ca-certificates gnupg git
 
-    # GitHub-backed authorized_keys sync. The original one-liner redirected
-    # curl straight into authorized_keys, which truncates the file before
-    # curl runs — a GitHub 503 or a dropped link would empty it and lock you
-    # out of a device whose only other input is its own keyboard. This
-    # fetches to a temp file, insists the result is non-empty and actually
-    # parses as SSH public keys, and only then swaps it in atomically.
+    # GitHub-backed authorized_keys sync. Fetches to a temp file, requires the
+    # result to be non-empty and to parse as SSH public keys, and only then
+    # swaps it in atomically: a failed fetch must never be able to empty
+    # authorized_keys on a device whose only other input is its own keyboard.
     write_file /usr/local/sbin/sync-github-keys 0755 <<'SYNCKEYS'
 #!/bin/sh
 # Managed by uconsole/setup.sh — refresh authorized_keys from GitHub.
@@ -526,36 +524,30 @@ MAINT
       apt_install clockworkpi-audio || warn "clockworkpi-audio failed"
     fi
 
-    # A complete config we author, rather than Debian's shipped one with sed
-    # patches on top. Patching left bindings in the file that this script did
-    # not choose and could not reason about; owning it outright means every
-    # key here is deliberate. It also avoids i3's interactive first-run config
-    # wizard, which would block a headless boot.
+    # The complete config, written here rather than patched onto Debian's, so
+    # every binding in it is one this script set. Writing it also avoids i3's
+    # interactive first-run config wizard, which would block a headless boot.
     #
-    # Note there is deliberately NO binding on a bare Return anywhere -- not
-    # even to leave resize mode, where Debian's config uses one. Enter must
-    # always just be Enter.
+    # No binding uses a bare Return anywhere, including to leave resize mode.
+    # Enter is always just Enter.
     #
     # This file is managed: local edits are overwritten on the next run.
     write_file "$USER_HOME/.config/i3/config" 0644 <<'I3CONF'
 # Managed by uconsole/setup.sh -- edits here are overwritten on the next run.
 
-# $mod is Alt (Mod1). The uConsole's CMD key is reachable only as Fn+CMD --
-# a two-key chord for every window operation -- so Alt wins on ergonomics
-# despite the cost below.
+# $mod is Alt (Mod1). The uConsole's CMD key needs Fn+CMD, a two-key chord for
+# every window operation.
 #
-# The cost: i3 grabs $mod combinations globally, so every plain Alt+<letter>
-# bound here is taken away from the shell, where readline uses Meta for word
-# motion. The bindings are therefore arranged to keep the ones worth keeping:
+# i3 grabs $mod combinations globally, so any plain Alt+<letter> bound here is
+# unavailable to the shell, where readline uses Meta for word motion. Window
+# management therefore lives on Alt+Shift, and i3 claims only these:
 #
-#   still available to bash:  Alt+b Alt+f Alt+d Alt+t Alt+u Alt+p Alt+y Alt+.
-#                             Alt+BackSpace  (word motion, kill-word, yank-arg)
 #   taken by i3:              Alt+h/j/k/l (focus), Alt+1..9 (workspaces),
 #                             Alt+r, Alt+Return
+#   left to bash:             Alt+b Alt+f Alt+d Alt+t Alt+u Alt+p Alt+y Alt+.
+#                             Alt+BackSpace  (word motion, kill-word, yank-arg)
 #
-# That trades away readline's M-l (downcase-word), M-r (revert-line) and
-# M-<digit> (digit-argument), which are rare, and keeps everything common.
-# Window management otherwise lives on Alt+Shift.
+# The cost is readline's M-l, M-r and M-<digit>.
 set $mod Mod1
 
 # 12pt is a starting point for the 5" 720p panel (~290 DPI); raise if small.
@@ -953,13 +945,11 @@ AUTOLOGIN
 
     if pkg_available hackergadgets-uconsole-aio-board; then
       log "vendor metapackage available — using it"
-      # Deliberately WITHOUT --install-recommends, despite the vendor guide
-      # saying to use it. Its Recommends are tar1090, sdrpp-brown and
-      # pygpsclient; tar1090 is an ADS-B stack that builds from source in its
-      # postinst (it depends on gcc, make, git, lighttpd, tk-dev) and starts
-      # readsb, which fails outright unless an RTL-SDR dongle is visible at
-      # install time. That failure leaves dpkg half-configured and, via apt's
-      # non-zero exit, aborted the whole run. Only Depends: rtl-sdr is needed.
+      # No --install-recommends: the Recommends are tar1090, sdrpp-brown and
+      # pygpsclient. tar1090 is an ADS-B stack that builds from source in its
+      # postinst (pulling gcc, make, git, lighttpd, tk-dev) and starts readsb,
+      # which claims the RTL-SDR and fails when none is visible. Only
+      # Depends: rtl-sdr is required here.
       if run apt-get install -y --no-install-recommends hackergadgets-uconsole-aio-board; then
         AIO_VIA_PACKAGE=true
       else
@@ -1236,9 +1226,6 @@ MESHYAML
     apt_install rtl-sdr librtlsdr0
 
     # The DVB-T driver claims the dongle on plug-in and starves SDR software.
-    # Named for what it does: rtl8xxxu, the previous filename, is Realtek's
-    # wifi driver and has nothing to do with these modules.
-    run rm -f /etc/modprobe.d/blacklist-rtl8xxxu.conf
     write_file /etc/modprobe.d/blacklist-dvb-rtl.conf 0644 <<'BLACKLIST'
 # Managed by uconsole/setup.sh — keep the DVB-T drivers off the RTL-SDR.
 # Without this the kernel binds the dongle as a TV tuner and every SDR tool
@@ -1285,7 +1272,7 @@ BLACKLIST
             for svc in readsb dump1090-fa dump1090 dump1090-mutability adsbexchange-feed skyaware978; do
               if systemctl is-active --quiet "$svc" 2>/dev/null; then
                 warn "  '$svc' is running and holds the SDR: sudo systemctl disable --now $svc"
-                note "The '$svc' service holds the RTL-SDR. It is an ADS-B decoder that restarts itself, so disable and mask it: sudo systemctl disable --now $svc && sudo systemctl mask $svc. Note readsb is NOT a dpkg package — tar1090's postinst builds it into /usr/bin, so 'apt purge' will not remove it."
+                note "The '$svc' service holds the RTL-SDR and restarts itself, so disable and mask it: sudo systemctl disable --now $svc && sudo systemctl mask $svc. Some decoders are built into /usr/bin by a postinst rather than installed as packages, so 'apt purge' may not remove them."
               fi
             done
             warn "  otherwise:  pgrep -a sdrpp   |   sudo fuser -v /dev/bus/usb/*/*"
@@ -1300,19 +1287,13 @@ BLACKLIST
       fi
     fi
 
-    # SDR++Brown rather than mainline SDR++, chosen for this hardware. The
-    # deciding factor is the waterfall: the fork does not re-upload a full
-    # image to the GPU every frame, and its zoom/regeneration is vectorised
-    # and multithreaded, which is where a CM4 actually hurts. It also adds
-    # wideband + audio noise reduction (useful on HF), FT8/FT4 decode with PSK
-    # reporter, a DSD decoder, and remote KiwiSDR. It is also simply newer
-    # (1.2.1.1 vs 1.1.0).
+    # SDR++Brown: its waterfall does not re-upload a full image to the GPU each
+    # frame and its zoom/regeneration is vectorised and multithreaded, which is
+    # what a CM4 needs. It also adds wideband and audio noise reduction, FT8/FT4
+    # decode with PSK reporter, a DSD decoder, and remote KiwiSDR.
     #
-    # Its small-screen work is Android/touch-specific and does NOT apply here.
-    #
-    # Caveat: the fork's own README says to prefer upstream for stability.
-    # Set SDR_APP=sdrpp to go back -- it declares Conflicts: sdrpp, so apt
-    # swaps between them cleanly in either direction.
+    # SDR_APP=sdrpp selects mainline instead; sdrpp-brown declares
+    # Conflicts: sdrpp, so apt swaps between them in either direction.
     local SDR_APP=sdrpp-brown
     if pkg_available "$SDR_APP"; then
       apt_install "$SDR_APP"

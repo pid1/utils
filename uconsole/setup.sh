@@ -81,6 +81,15 @@ main() {
   # not in these, and no AIO peripheral works non-root without them.
   local HW_GROUPS=(dialout spi i2c gpio plugdev audio video netdev)
 
+  # Kernel and boot firmware are held. The display, panel rotation and the AIO
+  # overlays all depend on kernel patches matched to this image, and the apt
+  # suite configured here carries newer kernels than the image ships -- so an
+  # unattended `maint` run could otherwise replace the kernel and leave a
+  # portable device with no display, away from a desk. Upgrade these
+  # deliberately: unhold, upgrade, reboot, verify, re-hold.
+  local HOLD_PACKAGES=(akrex-kernel clockworkpi-kernel clockworkpi-cm-firmware
+                       raspberrypi-kernel raspberrypi-bootloader)
+
   # --------------------------------------------------------------- arg parse
 
   local DRY_RUN=false
@@ -510,6 +519,27 @@ apt-get full-upgrade -y
 apt-get autoremove --purge -y
 
 echo
+echo "== held packages"
+# Held packages are skipped by the upgrade above by design, so say when one
+# has an update waiting rather than letting it sit unnoticed for months.
+held=$(apt-mark showhold 2>/dev/null || true)
+if [ -z "$held" ]; then
+    echo "  none"
+else
+    for p in $held; do
+        inst=$(apt-cache policy "$p" 2>/dev/null | awk '/Installed:/{print $2}')
+        cand=$(apt-cache policy "$p" 2>/dev/null | awk '/Candidate:/{print $2}')
+        if [ "$inst" != "$cand" ]; then
+            echo "  $p: held at $inst, $cand available"
+            echo "     upgrade deliberately: sudo apt-mark unhold $p && sudo apt install $p"
+            echo "     then reboot and confirm the display comes up before re-holding"
+        else
+            echo "  $p: $inst (current)"
+        fi
+    done
+fi
+
+echo
 echo "== configuration"
 tmp=$(mktemp)
 src=""
@@ -551,6 +581,16 @@ if [ -f /var/run/reboot-required ]; then
 fi
 MAINT
     log "installed the 'maint' maintenance command"
+
+    local hp
+    for hp in "${HOLD_PACKAGES[@]}"; do
+      pkg_installed "$hp" || continue
+      if apt-mark showhold 2>/dev/null | grep -qx "$hp"; then
+        log "already held: $hp"
+      else
+        run apt-mark hold "$hp" || warn "could not hold $hp"
+      fi
+    done
 
     # Hardware group membership — required for the AIO peripherals to be
     # usable without sudo. Only add groups that actually exist on this image.

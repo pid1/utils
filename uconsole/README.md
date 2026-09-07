@@ -128,8 +128,25 @@ One command, installed by the `base` section:
 Arguments pass through, so `sudo maint --dry-run` previews the configuration
 half without touching anything, and `sudo maint --only sdr` narrows it.
 
-Kernel updates arrive here too — Rex ships `clockworkpi-kernel` through his
-repo, so `full-upgrade` picks them up and the reboot notice will say so.
+**Kernel and boot firmware are held**, so `maint` will not replace them. The
+display, panel rotation and the AIO overlays depend on kernel patches matched
+to this image, and the apt suite the image ships carries newer kernels than the
+build — an unattended run could otherwise leave a portable device with no
+display, away from a desk.
+
+`maint` reports when a held package has an update waiting. Take those
+deliberately:
+
+```bash
+sudo apt-mark unhold clockworkpi-kernel
+sudo apt install clockworkpi-kernel
+sudo reboot                      # confirm the display comes up
+sudo apt-mark hold clockworkpi-kernel
+```
+
+Held by default: `akrex-kernel`, `clockworkpi-kernel`,
+`clockworkpi-cm-firmware`, `raspberrypi-kernel`, `raspberrypi-bootloader`
+(whichever are installed) — `HOLD_PACKAGES` in `setup.sh`.
 
 It fetches from `pid1.space/cpi`, falling back to the raw URL, and downloads to
 a file rather than piping — a truncated transfer is then caught by the same

@@ -257,10 +257,21 @@ already holds it — `LIBUSB_ERROR_BUSY`, not a broken device. Either SDR
 software is still running, or the kernel bound it as a TV tuner:
 
 ```bash
-pgrep -a sdrpp                        # close it if running
+sudo fuser -v /dev/bus/usb/*/*        # definitive: names the holding process
+systemctl is-active readsb            # ADS-B decoder — the usual culprit
+pgrep -a sdrpp                        # SDR++ still running?
 lsmod | grep -E 'rtl28|dvb'           # DVB-T driver bound?
-sudo modprobe -r dvb_usb_rtl28xxu     # release it
 ```
+
+An ADS-B decoder is the most common holder, and it is a *service* — it
+restarts itself and reclaims the dongle, so killing the process is not enough:
+
+```bash
+sudo systemctl disable --now readsb
+sudo apt purge -y readsb tar1090      # if you do not want ADS-B at all
+```
+
+For the kernel driver, `sudo modprobe -r dvb_usb_rtl28xxu`.
 
 The blacklist in `/etc/modprobe.d/blacklist-dvb-rtl.conf` stops it loading at
 boot, but a module already loaded stays loaded until unloaded or rebooted.

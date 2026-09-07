@@ -1277,10 +1277,18 @@ BLACKLIST
              && ! printf '%s' "$out" | grep -q 'Failed to open'; then
             log "rtl_test: device opens cleanly"
           elif printf '%s' "$out" | grep -q 'usb_claim_interface error -6'; then
-            warn "RTL-SDR is enumerated but BUSY (usb_claim_interface -6): another process or a kernel driver holds it."
-            warn "  running SDR software?  pgrep -a sdrpp"
-            warn "  driver still bound?    lsmod | grep -E 'rtl28|dvb'  then  sudo modprobe -r dvb_usb_rtl28xxu"
-            note "RTL-SDR was busy at setup time (usb_claim_interface -6). Close any running SDR software, or unload the DVB-T driver: sudo modprobe -r dvb_usb_rtl28xxu"
+            warn "RTL-SDR is enumerated but BUSY (usb_claim_interface -6): something already holds it."
+            # Name the actual holder rather than leaving a guessing game. An
+            # ADS-B decoder is the usual one: it is a service, so it restarts
+            # itself and reclaims the dongle after every attempt to free it.
+            local svc
+            for svc in readsb dump1090-fa dump1090 dump1090-mutability adsbexchange-feed skyaware978; do
+              if systemctl is-active --quiet "$svc" 2>/dev/null; then
+                warn "  '$svc' is running and holds the SDR: sudo systemctl disable --now $svc"
+                note "The '$svc' service holds the RTL-SDR. It is an ADS-B decoder and restarts itself, so disable it: sudo systemctl disable --now $svc  (and 'sudo apt purge $svc' if unwanted)."
+              fi
+            done
+            warn "  otherwise:  pgrep -a sdrpp   |   sudo fuser -v /dev/bus/usb/*/*"
           elif [[ -n $out ]]; then
             warn "RTL-SDR enumerates but rtl_test cannot open it — check the plugdev group (needs a full re-login):"
             printf '%s\n' "$out" | sed 's/^/      /' >&2

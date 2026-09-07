@@ -4,7 +4,13 @@
 # with the HackerGadgets AIO v2 board. See README.md in this directory for
 # what it installs, key bindings, and post-install steps.
 #
-#   curl -fsSL pid1.space/cpi | sudo bash        (mirror of this file)
+#   curl -fsSL pid1.space/cpi | sudo bash
+#
+# pid1.space/cpi is a mirror of this file, republished by
+# .github/workflows/publish-cpi.yml. If it is stale or unreachable, the raw
+# URL is the source of truth:
+#
+#   curl -fsSL https://raw.githubusercontent.com/pid1/utils/main/uconsole/setup.sh | sudo bash
 #
 # Flags must go through `bash -s --`; `| sudo bash --dry-run` hands the flag to
 # bash instead of to this script:

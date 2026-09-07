@@ -7,14 +7,22 @@ Bookworm image**, with the **HackerGadgets AIO v2** extension board.
 curl -fsSL pid1.space/cpi | sudo bash
 ```
 
-`pid1.space/cpi` is a mirror of `uconsole/setup.sh`, published to
+<details>
+<summary>If the short URL is down</summary>
+
+`pid1.space/cpi` is a mirror of `uconsole/setup.sh`, republished to
 `pid1.github.io` by [`publish-cpi.yml`](../.github/workflows/publish-cpi.yml)
-whenever this script changes. This repo is the source of truth; the raw URL
-works too:
+on every change to this script. It can lag by a minute or two while Pages
+rebuilds, and it depends on that workflow having run. This repo is always the
+source of truth, so the raw URL is the fallback and is never stale:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/pid1/utils/main/uconsole/setup.sh | sudo bash
 ```
+
+Both take the same flags. Substitute either URL wherever this README says
+`pid1.space/cpi`.
+</details>
 
 Re-running is safe and is the intended way to use this — every step is
 idempotent, and a run that changes nothing writes nothing.

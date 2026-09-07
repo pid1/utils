@@ -14,6 +14,13 @@
 # stdin is the script itself, so nothing here may read from it. All apt calls
 # are non-interactive; the escape hatch for a real prompt is `< /dev/tty`.
 #
+# Re-running is safe and is the intended way to use this as config management:
+# every step is idempotent. Files it owns are rewritten from source rather than
+# appended to, config.txt edits are confined to a marker block that is replaced
+# wholesale, package purges only touch what is installed, and backups are taken
+# once rather than per run so repeat runs cannot fill the boot partition or
+# $HOME with timestamped copies. A run that changes nothing writes nothing.
+#
 # Flags have to go through `bash -s --`, since `| sudo bash --dry-run` would
 # hand the flag to bash instead of to us:
 #
@@ -333,11 +340,20 @@ main() {
 
   # Back up the boot files once per run, before anything touches them.
   local STAMP; STAMP=$(date +%Y%m%d-%H%M%S)
+  # Back up once, not per run: this script is meant to be re-runnable as
+  # config management, and /boot/firmware is a small FAT partition that would
+  # slowly fill with timestamped copies. The first backup is the pristine
+  # pre-script state, which is the one worth keeping.
   local f
   for f in "$BOOT_DIR/config.txt" "$BOOT_DIR/cmdline.txt"; do
-    [[ -f $f ]] && run cp -a "$f" "${f}.bak-${STAMP}"
+    [[ -f $f ]] || continue
+    if compgen -G "${f}.bak-*" >/dev/null; then
+      log "$(basename "$f"): pre-existing backup kept ($(basename "$(ls -1 "${f}".bak-* | head -1)"))"
+    else
+      run cp -a "$f" "${f}.bak-${STAMP}"
+      log "$(basename "$f") backed up as .bak-${STAMP}"
+    fi
   done
-  log "boot files backed up with suffix .bak-${STAMP}"
 
   export DEBIAN_FRONTEND=noninteractive
   apt_update_soft
@@ -1041,10 +1057,15 @@ BLACKLIST
     # alone — this only copies data into SDR++, and takes a tarball besides.
     if [[ -f "$USER_HOME/.config/gqrx/bookmarks.csv" ]]; then
       apt_install python3
-      local gqrx_backup="$USER_HOME/gqrx-config-backup-${STAMP}.tar.gz"
-      run tar czf "$gqrx_backup" -C "$USER_HOME/.config" gqrx
-      run chown "${DESKTOP_USER}:${USER_GROUP}" "$gqrx_backup"
-      log "backed up gqrx config to $gqrx_backup"
+      # Once only — re-running must not litter $HOME with tarballs.
+      if compgen -G "$USER_HOME/gqrx-config-backup-*.tar.gz" >/dev/null; then
+        log "gqrx config backup already exists, keeping it"
+      else
+        local gqrx_backup="$USER_HOME/gqrx-config-backup-${STAMP}.tar.gz"
+        run tar czf "$gqrx_backup" -C "$USER_HOME/.config" gqrx
+        run chown "${DESKTOP_USER}:${USER_GROUP}" "$gqrx_backup"
+        log "backed up gqrx config to $gqrx_backup"
+      fi
 
       write_file /usr/local/sbin/gqrx-bookmarks-to-sdrpp 0755 <<'GQRXCONV'
 #!/usr/bin/env python3
@@ -1141,17 +1162,14 @@ def main():
         return 0
 
     # Load and merge, rather than overwrite: SDR++ may already have lists.
-    if os.path.isfile(sdrpp_cfg):
+    existed = os.path.isfile(sdrpp_cfg)
+    if existed:
         try:
             with open(sdrpp_cfg, "r", encoding="utf-8") as fh:
                 cfg = json.load(fh)
         except (ValueError, OSError) as exc:
             print("  existing %s is unreadable (%s) — refusing to touch it" % (sdrpp_cfg, exc))
             return 1
-        if not args.dry_run:
-            backup = "%s.bak-%s" % (sdrpp_cfg, time.strftime("%Y%m%d-%H%M%S"))
-            shutil.copy2(sdrpp_cfg, backup)
-            print("  backed up existing SDR++ bookmarks to %s" % backup)
     else:
         cfg = {"selectedList": "General", "bookmarkDisplayMode": 1, "lists": {}}
 
@@ -1186,6 +1204,17 @@ def main():
         print("  [dry-run] would write %d bookmark(s) across %d list(s) to %s"
               % (added, len(cfg["lists"]), sdrpp_cfg))
         return 0
+
+    # Nothing new to import: leave the file alone and take no backup, so
+    # repeated runs stay a genuine no-op.
+    if existed and not added:
+        print("  all %d bookmark(s) already present; nothing to do" % skipped)
+        return 0
+
+    if existed:
+        backup = "%s.bak-%s" % (sdrpp_cfg, time.strftime("%Y%m%d-%H%M%S"))
+        shutil.copy2(sdrpp_cfg, backup)
+        print("  backed up existing SDR++ bookmarks to %s" % backup)
 
     # A selectedList naming a list that does not exist leaves the Frequency
     # Manager pointed at nothing on first launch.
@@ -1311,17 +1340,14 @@ def main():
     )
     cp.optionxform = str      # QSettings keys are case-sensitive
 
-    if os.path.isfile(ini):
+    existed = os.path.isfile(ini)
+    if existed:
         try:
             with open(ini, encoding="utf-8") as fh:
                 cp.read_file(fh)
         except (configparser.Error, OSError, UnicodeDecodeError) as exc:
             print("  existing %s is unparseable (%s) — refusing to touch it" % (ini, exc))
             return 1
-        if not args.dry_run:
-            backup = "%s.bak-%s" % (ini, time.strftime("%Y%m%d-%H%M%S"))
-            shutil.copy2(ini, backup)
-            print("  backed up existing config to %s" % backup)
     else:
         print("  no existing JS8Call.ini — creating one")
 
@@ -1337,6 +1363,17 @@ def main():
     if args.dry_run:
         print("  [dry-run] would write %d key(s) to %s" % (len(changed), ini))
         return 0
+
+    # Re-running as config management must be a no-op when nothing differs:
+    # no rewrite, and above all no new backup file each time.
+    if existed and not changed:
+        print("  %s already correct; nothing to do" % ini)
+        return 0
+
+    if existed:
+        backup = "%s.bak-%s" % (ini, time.strftime("%Y%m%d-%H%M%S"))
+        shutil.copy2(ini, backup)
+        print("  backed up existing config to %s" % backup)
 
     os.makedirs(os.path.dirname(ini), exist_ok=True)
     tmp = ini + ".tmp"
@@ -1399,7 +1436,9 @@ JS8CONF
     run systemctl enable --now tailscaled
 
     # 'tailscale up' needs interactive auth, which a piped script cannot do.
-    if [[ -n ${TS_AUTHKEY:-} ]]; then
+    if tailscale status >/dev/null 2>&1; then
+      log "tailscale already authenticated; leaving it alone"
+    elif [[ -n ${TS_AUTHKEY:-} ]]; then
       run tailscale up --authkey "$TS_AUTHKEY" --hostname uconsole \
         || warn "tailscale up failed — check the auth key"
       log "tailscale brought up as 'uconsole'"

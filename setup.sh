@@ -4,13 +4,13 @@
 # with the HackerGadgets AIO v2 board. See README.md in this directory for
 # what it installs, key bindings, and post-install steps.
 #
-#   curl -fsSL pid1.space/cpi | sudo bash
+#   curl -fsSL pid1.space/rx | sudo bash
 #
-# pid1.space/cpi is a mirror of this file, republished by
-# .github/workflows/publish-cpi.yml. If it is stale or unreachable, the raw
+# pid1.space/rx is a mirror of this file, republished by
+# .github/workflows/publish-rx.yml. If it is stale or unreachable, the raw
 # URL is the source of truth:
 #
-#   curl -fsSL https://raw.githubusercontent.com/pid1/utils/main/uconsole/setup.sh | sudo bash
+#   curl -fsSL https://raw.githubusercontent.com/pid1/rx/main/setup.sh | sudo bash
 #
 # Flags must go through `bash -s --`; `| sudo bash --dry-run` hands the flag to
 # bash instead of to this script:
@@ -382,7 +382,7 @@ main() {
     # authorized_keys on a device whose only other input is its own keyboard.
     write_file /usr/local/sbin/sync-github-keys 0755 <<'SYNCKEYS'
 #!/bin/sh
-# Managed by uconsole/setup.sh — refresh authorized_keys from GitHub.
+# Managed by rx/setup.sh — refresh authorized_keys from GitHub.
 set -eu
 
 GH_USER="__GH_USER__"
@@ -434,7 +434,7 @@ SYNCKEYS
     fi
 
     write_file /etc/cron.d/keys 0644 <<'CRON'
-# Managed by uconsole/setup.sh
+# Managed by rx/setup.sh
 SHELL=/bin/sh
 PATH=/usr/local/sbin:/usr/local/bin:/sbin:/bin:/usr/sbin:/usr/bin
 */5 * * * *   root   /usr/local/sbin/sync-github-keys
@@ -453,7 +453,7 @@ CRON
       # up a password prompt even when PasswordAuthentication is no.
       if grep -qs '^[[:space:]]*Include[[:space:]]\+/etc/ssh/sshd_config.d/\*.conf' /etc/ssh/sshd_config; then
         write_file /etc/ssh/sshd_config.d/10-no-password.conf 0644 <<'SSHDNOPW'
-# Managed by uconsole/setup.sh
+# Managed by rx/setup.sh
 PasswordAuthentication no
 KbdInteractiveAuthentication no
 SSHDNOPW
@@ -483,10 +483,10 @@ SSHDNOPW
     # One command for routine upkeep: package updates plus a re-apply of this
     # script, which is idempotent and so only changes what has drifted or is
     # newly added. /usr/local/bin rather than sbin -- Debian keeps sbin off a
-    # normal user's PATH, so `sudo cpi` would not resolve.
+    # normal user's PATH, so `sudo maint` would not resolve.
     write_file /usr/local/bin/maint 0755 <<'MAINT'
 #!/bin/bash
-# Managed by uconsole/setup.sh — daily maintenance.
+# Managed by rx/setup.sh — daily maintenance.
 #
 #   sudo maint              update packages, then re-apply configuration
 #   sudo maint --dry-run    show what the config step would change
@@ -494,12 +494,12 @@ SSHDNOPW
 # Arguments pass through to setup.sh, so --only/--skip work here too.
 set -euo pipefail
 
-# Source of truth first. pid1.space/cpi is a mirror republished by a workflow;
+# Source of truth first. pid1.space/rx is a mirror republished by a workflow;
 # if that workflow ever breaks it freezes at its last successful publish and
 # keeps serving it, so preferring it here would silently apply a stale config
 # forever. It stays as the fallback for when GitHub is unreachable.
-PRIMARY=https://raw.githubusercontent.com/pid1/utils/main/uconsole/setup.sh
-FALLBACK=https://pid1.space/cpi
+PRIMARY=https://raw.githubusercontent.com/pid1/rx/main/setup.sh
+FALLBACK=https://pid1.space/rx
 
 if [ "$(id -u)" -ne 0 ]; then
     echo "maint: needs root — run: sudo maint $*" >&2
@@ -633,7 +633,7 @@ MAINT
     #
     # This file is managed: local edits are overwritten on the next run.
     write_file "$USER_HOME/.config/i3/config" 0644 <<'I3CONF'
-# Managed by uconsole/setup.sh -- edits here are overwritten on the next run.
+# Managed by rx/setup.sh -- edits here are overwritten on the next run.
 
 # $mod is Alt (Mod1). The uConsole's CMD key needs Fn+CMD, a two-key chord for
 # every window operation.
@@ -774,7 +774,7 @@ I3CONF
     if $DRY_RUN; then
       log "[dry-run] fetch alacritty.toml into $aldir"
     elif curl -fsSL --max-time 20 \
-           "https://raw.githubusercontent.com/${GH_KEY_USER}/utils/main/alacritty.toml" \
+           "https://raw.githubusercontent.com/${GH_KEY_USER}/rx/main/alacritty.toml" \
            -o "$aldir/alacritty.toml"; then
       sed -i 's|^\( *\)\("~/.*themes.*\.toml"\)|\1# \2  # uconsole-setup: no such file|' \
         "$aldir/alacritty.toml"
@@ -818,7 +818,7 @@ I3CONF
     write_file /etc/fonts/local.conf 0644 <<'FONTCONF'
 <?xml version="1.0"?>
 <!DOCTYPE fontconfig SYSTEM "fonts.dtd">
-<!-- Managed by uconsole/setup.sh -->
+<!-- Managed by rx/setup.sh -->
 <fontconfig>
   <alias>
     <family>monospace</family>
@@ -854,7 +854,7 @@ FONTCONF
     # battery is not exposed as a standard power_supply device. Replaced with
     # labelled CPU, RAM and temperature so the numbers are identifiable.
     write_file "$USER_HOME/.config/i3status/config" 0644 <<'I3STATUS'
-# Managed by uconsole/setup.sh
+# Managed by rx/setup.sh
 general {
         colors = true
         interval = 5
@@ -932,7 +932,7 @@ I3STATUS
     # 1. Xorg itself, from server start. This is the durable one: it applies
     #    before any session script runs and survives anything that resets xset.
     write_file /etc/X11/xorg.conf.d/10-no-blanking.conf 0644 <<'XORGBLANK'
-# Managed by uconsole/setup.sh
+# Managed by rx/setup.sh
 Section "ServerFlags"
     Option "BlankTime"   "0"
     Option "StandbyTime" "0"
@@ -947,7 +947,7 @@ XORGBLANK
 
     # 2. logind, so no idle action fires at the seat level.
     write_file /etc/systemd/logind.conf.d/10-no-idle.conf 0644 <<'LOGIND'
-# Managed by uconsole/setup.sh
+# Managed by rx/setup.sh
 [Login]
 IdleAction=ignore
 IdleActionSec=0
@@ -968,7 +968,7 @@ LOGIND
 
     write_file "$USER_HOME/.xinitrc" 0755 <<'XINITRC'
 #!/bin/sh
-# Managed by uconsole/setup.sh
+# Managed by rx/setup.sh
 line=$(xrandr | grep -m1 ' connected')
 out=${line%% *}
 geom=$(printf '%s\n' "$line" | grep -oE '[0-9]+x[0-9]+\+[0-9]+\+[0-9]+' | head -1)
@@ -995,7 +995,7 @@ XINITRC
     # Sourcing .profile keeps this from shadowing the shell's normal setup,
     # which bash would otherwise skip once .bash_profile exists.
     write_file "$USER_HOME/.bash_profile" 0644 <<'BASHPROF'
-# Managed by uconsole/setup.sh
+# Managed by rx/setup.sh
 [ -f "$HOME/.profile" ] && . "$HOME/.profile"
 
 # Deliberately not `exec startx`: with exec, a failing X replaces the login
@@ -1152,7 +1152,7 @@ AUTOLOGIN
       apt_install pinctrl || apt_install raspi-utils || true
       write_file /usr/local/sbin/uconsole-aio-rails 0755 <<'RAILS'
 #!/bin/sh
-# Managed by uconsole/setup.sh — AIO v2 GPIO power rails.
+# Managed by rx/setup.sh — AIO v2 GPIO power rails.
 #
 #   usage: uconsole-aio-rails [on|off]           boot rails (SDR + USB hub)
 #          uconsole-aio-rails <RAIL> [on|off]    one rail by name
@@ -1309,7 +1309,7 @@ UNIT
     run systemctl disable --now serial-getty@ttyS0.service 2>/dev/null || true
 
     write_file /etc/default/gpsd 0644 <<'GPSD'
-# Managed by uconsole/setup.sh — AIO v2 GPS on the CM4 PL011 UART.
+# Managed by rx/setup.sh — AIO v2 GPS on the CM4 PL011 UART.
 START_DAEMON="true"
 USBAUTO="false"
 DEVICES="/dev/ttyS0"
@@ -1344,7 +1344,7 @@ GPSD
 
     if [[ $chrony_target == "$chrony_drop" ]]; then
       write_file "$chrony_drop" 0644 <<CHRONYGPS
-# Managed by uconsole/setup.sh — GPS-disciplined time.
+# Managed by rx/setup.sh — GPS-disciplined time.
 #
 # gpsd publishes NMEA time on SHM segment 0. That is only good to ~100 ms, so
 # it supplies coarse time while the kernel PPS device from the pps-gpio
@@ -1412,7 +1412,7 @@ CHRONYGPS
     # sed-ing structured YAML in place is a good way to break a config.
     if [[ -d /etc/meshtasticd/config.d ]] || $DRY_RUN; then
       write_file /etc/meshtasticd/config.d/uconsole-aio-v2.yaml 0644 <<'MESHYAML'
-# Managed by uconsole/setup.sh — HackerGadgets AIO v2 (SX1262) on uConsole CM4.
+# Managed by rx/setup.sh — HackerGadgets AIO v2 (SX1262) on uConsole CM4.
 Lora:
   Module: sx1262
   DIO2_AS_RF_SWITCH: true
@@ -1521,7 +1521,7 @@ MESHYAML
     # alone would show a dashboard with nothing behind it.
     write_file /usr/local/bin/mesh 0755 <<'MESHLAUNCH'
 #!/bin/bash
-# Managed by uconsole/setup.sh — start meshtasticd, then the dashboard.
+# Managed by rx/setup.sh — start meshtasticd, then the dashboard.
 set -euo pipefail
 
 fail() {
@@ -1603,7 +1603,7 @@ MESHLAUNCH
 
     # The DVB-T driver claims the dongle on plug-in and starves SDR software.
     write_file /etc/modprobe.d/blacklist-dvb-rtl.conf 0644 <<'BLACKLIST'
-# Managed by uconsole/setup.sh — keep the DVB-T drivers off the RTL-SDR.
+# Managed by rx/setup.sh — keep the DVB-T drivers off the RTL-SDR.
 # Without this the kernel binds the dongle as a TV tuner and every SDR tool
 # fails with usb_claim_interface error -6 (LIBUSB_ERROR_BUSY).
 blacklist dvb_usb_rtl28xxu
@@ -1698,7 +1698,7 @@ BLACKLIST
 
       write_file /usr/local/sbin/gqrx-bookmarks-to-sdrpp 0755 <<'GQRXCONV'
 #!/usr/bin/env python3
-"""Managed by uconsole/setup.sh — carry gqrx bookmarks over to SDR++.
+"""Managed by rx/setup.sh — carry gqrx bookmarks over to SDR++.
 
 gqrx stores bookmarks as semicolon-delimited CSV with two sections: tag lines
 (2 fields) and bookmark lines (5 fields: frequency; name; modulation;
@@ -1912,7 +1912,7 @@ GQRXCONV
     # rig control are not, since those depend on the radio attached here.
     write_file /usr/local/sbin/js8call-ghostnet-config 0755 <<'JS8CONF'
 #!/usr/bin/env python3
-"""Managed by uconsole/setup.sh — apply the GhostNet JS8Call configuration.
+"""Managed by rx/setup.sh — apply the GhostNet JS8Call configuration.
 
 Migrated selectively from a working macOS JS8Call install. Only portable keys
 are written: identity, groups, heartbeat/autoreply behaviour, and the dial

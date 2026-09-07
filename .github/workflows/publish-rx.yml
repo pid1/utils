@@ -1,7 +1,7 @@
-name: publish cpi
+name: publish rx
 
-# Mirrors uconsole/setup.sh to pid1.github.io as /cpi, so the install line is
-#   curl -fsSL pid1.space/cpi | sudo bash
+# Mirrors setup.sh to pid1.github.io as /rx, so the install line is
+#   curl -fsSL pid1.space/rx | sudo bash
 # GitHub Pages cannot redirect server-side, and a meta-refresh page would pipe
 # HTML into bash, so the file has to genuinely exist at that path. This repo
 # stays the single source of truth; the copy in the site repo is generated.
@@ -13,8 +13,8 @@ on:
   push:
     branches: [main]
     paths:
-      - uconsole/setup.sh
-      - .github/workflows/publish-cpi.yml
+      - setup.sh
+      - .github/workflows/publish-rx.yml
   workflow_dispatch:
 
 # Only the site checkout needs write access, and it uses the PAT for that.
@@ -22,7 +22,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: publish-cpi
+  group: publish-rx
   cancel-in-progress: false
 
 jobs:
@@ -40,7 +40,7 @@ jobs:
       - name: Verify the script before publishing
         run: |
           set -euo pipefail
-          script=uconsole/setup.sh
+          script=setup.sh
 
           bash -n "$script"
 
@@ -61,24 +61,24 @@ jobs:
           token: ${{ secrets.SITE_PUSH_TOKEN }}
           path: site
 
-      - name: Update /cpi
-        run: install -m 0644 uconsole/setup.sh site/cpi
+      - name: Update /rx
+        run: install -m 0644 setup.sh site/rx
 
       - name: Commit and push if changed
         working-directory: site
         run: |
           set -euo pipefail
 
-          # --porcelain rather than `git diff`, so a first run where cpi is
+          # --porcelain rather than `git diff`, so a first run where rx is
           # still untracked is detected as a change rather than skipped.
-          if [ -z "$(git status --porcelain -- cpi)" ]; then
-            echo "cpi already matches uconsole/setup.sh; nothing to publish."
+          if [ -z "$(git status --porcelain -- rx)" ]; then
+            echo "rx already matches setup.sh; nothing to publish."
             exit 0
           fi
 
           git config user.name  "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add cpi
-          git commit -m "Publish /cpi from pid1/utils@${GITHUB_SHA:0:7}"
+          git add rx
+          git commit -m "Publish /rx from pid1/utils@${GITHUB_SHA:0:7}"
           git push
-          echo "published; live at https://pid1.space/cpi once Pages rebuilds"
+          echo "published; live at https://pid1.space/rx once Pages rebuilds"

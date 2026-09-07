@@ -252,6 +252,19 @@ A working device and a dead one look the same in SDR++, so check in this order:
 4. **Test on a strong FM broadcast** (88–108 MHz) before anything weak.
 5. Check the waterfall **min/max dB** sliders have not collapsed together.
 
+**`usb_claim_interface error -6`** means the dongle enumerated but something
+already holds it — `LIBUSB_ERROR_BUSY`, not a broken device. Either SDR
+software is still running, or the kernel bound it as a TV tuner:
+
+```bash
+pgrep -a sdrpp                        # close it if running
+lsmod | grep -E 'rtl28|dvb'           # DVB-T driver bound?
+sudo modprobe -r dvb_usb_rtl28xxu     # release it
+```
+
+The blacklist in `/etc/modprobe.d/blacklist-dvb-rtl.conf` stops it loading at
+boot, but a module already loaded stays loaded until unloaded or rebooted.
+
 Prove the hardware independently of SDR++ first:
 
 ```bash

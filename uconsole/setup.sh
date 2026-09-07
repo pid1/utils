@@ -1236,11 +1236,18 @@ MESHYAML
     apt_install rtl-sdr librtlsdr0
 
     # The DVB-T driver claims the dongle on plug-in and starves SDR software.
-    write_file /etc/modprobe.d/blacklist-rtl8xxxu.conf 0644 <<'BLACKLIST'
-# Managed by uconsole/setup.sh — keep the DVB-T driver off the RTL-SDR.
+    # Named for what it does: rtl8xxxu, the previous filename, is Realtek's
+    # wifi driver and has nothing to do with these modules.
+    run rm -f /etc/modprobe.d/blacklist-rtl8xxxu.conf
+    write_file /etc/modprobe.d/blacklist-dvb-rtl.conf 0644 <<'BLACKLIST'
+# Managed by uconsole/setup.sh — keep the DVB-T drivers off the RTL-SDR.
+# Without this the kernel binds the dongle as a TV tuner and every SDR tool
+# fails with usb_claim_interface error -6 (LIBUSB_ERROR_BUSY).
 blacklist dvb_usb_rtl28xxu
 blacklist rtl2832
 blacklist rtl2830
+blacklist rtl2832_sdr
+blacklist dvb_usb_v2
 BLACKLIST
     log "blacklisted the DVB-T kernel drivers"
 
@@ -1248,7 +1255,7 @@ BLACKLIST
     # bound to the dongle, the device stays claimed until it is unloaded.
     if ! $DRY_RUN; then
       local mod
-      for mod in dvb_usb_rtl28xxu rtl2832 rtl2830; do
+      for mod in dvb_usb_rtl28xxu rtl2832_sdr rtl2832 rtl2830 dvb_usb_v2; do
         if lsmod 2>/dev/null | grep -q "^${mod} "; then
           modprobe -r "$mod" 2>/dev/null \
             && log "unloaded $mod (was holding the dongle)" \
@@ -1264,10 +1271,19 @@ BLACKLIST
       if lsusb 2>/dev/null | grep -qiE 'RTL2832|RTL2838|Realtek.*DVB|0bda:2838'; then
         log "RTL-SDR present on USB"
         if command -v rtl_test >/dev/null 2>&1; then
-          if timeout 10 rtl_test -t </dev/null >/dev/null 2>&1; then
+          local out
+          out=$(timeout 10 rtl_test -t </dev/null 2>&1 || true)
+          if printf '%s' "$out" | grep -q 'Found 1 device' \
+             && ! printf '%s' "$out" | grep -q 'Failed to open'; then
             log "rtl_test: device opens cleanly"
-          else
-            warn "RTL-SDR enumerates but rtl_test cannot open it — check the plugdev group (needs re-login) or a driver still holding it"
+          elif printf '%s' "$out" | grep -q 'usb_claim_interface error -6'; then
+            warn "RTL-SDR is enumerated but BUSY (usb_claim_interface -6): another process or a kernel driver holds it."
+            warn "  running SDR software?  pgrep -a sdrpp"
+            warn "  driver still bound?    lsmod | grep -E 'rtl28|dvb'  then  sudo modprobe -r dvb_usb_rtl28xxu"
+            note "RTL-SDR was busy at setup time (usb_claim_interface -6). Close any running SDR software, or unload the DVB-T driver: sudo modprobe -r dvb_usb_rtl28xxu"
+          elif [[ -n $out ]]; then
+            warn "RTL-SDR enumerates but rtl_test cannot open it — check the plugdev group (needs a full re-login):"
+            printf '%s\n' "$out" | sed 's/^/      /' >&2
           fi
         fi
       else

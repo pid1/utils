@@ -578,8 +578,12 @@ XINITRC
 # Managed by uconsole-setup.sh
 [ -f "$HOME/.profile" ] && . "$HOME/.profile"
 
+# Deliberately not `exec startx`: with exec, a failing X replaces the login
+# shell, the shell exits, getty respawns, autologin fires again -- an endless
+# tty1 login loop with no prompt to debug from. This way a failure (or exiting
+# i3) drops you at a shell on tty1 instead.
 if [ -z "${DISPLAY:-}" ] && [ "$(tty)" = "/dev/tty1" ]; then
-    exec startx
+    startx || echo "startx exited ($?); you are at a shell on tty1."
 fi
 BASHPROF
 

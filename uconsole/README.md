@@ -76,7 +76,7 @@ Every section is skippable with `--skip NAME`, or run alone with `--only NAME`.
 
 | Section | What it does |
 |---|---|
-| `base` | Timezone (America/Chicago), hushlogin, sshd enabled, GitHub-backed `authorized_keys` sync, the `cpi` maintenance command, hardware group membership |
+| `base` | Timezone (America/Chicago), hushlogin, sshd enabled, GitHub-backed `authorized_keys` sync, the `maint` maintenance command, hardware group membership |
 | `desktop` | X11 + i3, autologin on tty1, Alacritty, Atkinson fonts, PipeWire, blanking disabled |
 | `claude` | Claude Code from Anthropic's signed apt repo |
 | `aio` | HackerGadgets AIO v2 metapackage, GPIO power rails, boot overlays |
@@ -115,7 +115,7 @@ curl -fsSL pid1.space/cpi | sudo TS_AUTHKEY=tskey-auth-... bash -s -- --only tai
 ## Routine maintenance
 
 ```bash
-sudo cpi
+sudo maint
 ```
 
 One command, installed by the `base` section:
@@ -125,8 +125,8 @@ One command, installed by the `base` section:
    added configuration change
 3. reports whether a reboot is pending, and which packages want one
 
-Arguments pass through, so `sudo cpi --dry-run` previews the configuration
-half without touching anything, and `sudo cpi --only sdr` narrows it.
+Arguments pass through, so `sudo maint --dry-run` previews the configuration
+half without touching anything, and `sudo maint --only sdr` narrows it.
 
 Kernel updates arrive here too — Rex ships `clockworkpi-kernel` through his
 repo, so `full-upgrade` picks them up and the reboot notice will say so.

@@ -405,12 +405,12 @@ CRON
     # script, which is idempotent and so only changes what has drifted or is
     # newly added. /usr/local/bin rather than sbin -- Debian keeps sbin off a
     # normal user's PATH, so `sudo cpi` would not resolve.
-    write_file /usr/local/bin/cpi 0755 <<'CPIMAINT'
+    write_file /usr/local/bin/maint 0755 <<'MAINT'
 #!/bin/bash
 # Managed by uconsole/setup.sh — daily maintenance.
 #
-#   sudo cpi              update packages, then re-apply configuration
-#   sudo cpi --dry-run    show what the config step would change
+#   sudo maint              update packages, then re-apply configuration
+#   sudo maint --dry-run    show what the config step would change
 #
 # Arguments pass through to setup.sh, so --only/--skip work here too.
 set -euo pipefail
@@ -419,7 +419,7 @@ PRIMARY=https://pid1.space/cpi
 FALLBACK=https://raw.githubusercontent.com/pid1/utils/main/uconsole/setup.sh
 
 if [ "$(id -u)" -ne 0 ]; then
-    echo "cpi: needs root — run: sudo cpi $*" >&2
+    echo "maint: needs root — run: sudo maint $*" >&2
     exit 1
 fi
 
@@ -431,7 +431,7 @@ echo "== packages"
 apt-get update -y \
     --allow-releaseinfo-change-version \
     --allow-releaseinfo-change-label \
-    || echo "cpi: apt update reported errors, continuing" >&2
+    || echo "maint: apt update reported errors, continuing" >&2
 apt-get full-upgrade -y
 apt-get autoremove --purge -y
 
@@ -451,11 +451,11 @@ if curl -fsSL --max-time 30 "$PRIMARY" -o "$tmp" \
        && tail -1 "$tmp" | grep -qx 'main "\$@"'; then
         bash "$tmp" "$@"
     else
-        echo "cpi: downloaded setup.sh failed verification; config step skipped" >&2
+        echo "maint: downloaded setup.sh failed verification; config step skipped" >&2
         exit 1
     fi
 else
-    echo "cpi: could not fetch setup.sh from either URL; config step skipped" >&2
+    echo "maint: could not fetch setup.sh from either URL; config step skipped" >&2
     exit 1
 fi
 
@@ -464,8 +464,8 @@ if [ -f /var/run/reboot-required ]; then
     echo "== reboot required"
     sed 's/^/   /' /var/run/reboot-required.pkgs 2>/dev/null || true
 fi
-CPIMAINT
-    log "installed the 'cpi' maintenance command"
+MAINT
+    log "installed the 'maint' maintenance command"
 
     # Hardware group membership — required for the AIO peripherals to be
     # usable without sudo. Only add groups that actually exist on this image.
@@ -478,7 +478,7 @@ CPIMAINT
       run usermod -aG "$joined" "$DESKTOP_USER"
       log "added $DESKTOP_USER to: ${present[*]}"
       note "Group changes need a full logout/login (or reboot) before they apply."
-    note "Routine upkeep is one command: 'sudo cpi' — apt update + full-upgrade + autoremove, then re-applies this script (idempotent, so only drift changes). 'sudo cpi --dry-run' previews the config half."
+    note "Routine upkeep is one command: 'sudo maint' — apt update + full-upgrade + autoremove, then re-applies this script (idempotent, so only drift changes). 'sudo maint --dry-run' previews the config half."
     note "SSH is listening on 22, keys synced from github.com/${GH_KEY_USER}.keys. Password auth is still enabled — turn it off in /etc/ssh/sshd_config once key login is confirmed working."
     fi
   fi

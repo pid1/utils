@@ -493,126 +493,114 @@ CRON
       apt_install clockworkpi-audio || warn "clockworkpi-audio failed"
     fi
 
-    # i3 runs an interactive config wizard when it starts with no config,
-    # which would block a headless first boot. Write one up front.
-    local i3dir="$USER_HOME/.config/i3"
-    if [[ -f /etc/i3/config ]]; then
-      run mkdir -p "$i3dir"
-      run cp -n /etc/i3/config "$i3dir/config"
-      # Mod1 is Alt, which collides with too much; Mod4 is the super key.
-      # Changing the definition line retroactively changes every later
-      # expansion, because i3 substitutes variables in parse order.
-      $DRY_RUN || sed -i 's/^set \$mod Mod1/set $mod Mod4/' "$i3dir/config"
-    else
-      warn "/etc/i3/config missing — writing a minimal config"
-      write_file "$i3dir/config" 0644 <<'I3MIN'
+    # A complete config we author, rather than Debian's shipped one with sed
+    # patches on top. Patching left bindings in the file that this script did
+    # not choose and could not reason about; owning it outright means every
+    # key here is deliberate. It also avoids i3's interactive first-run config
+    # wizard, which would block a headless boot.
+    #
+    # Note there is deliberately NO binding on a bare Return anywhere -- not
+    # even to leave resize mode, where Debian's config uses one. Enter must
+    # always just be Enter.
+    #
+    # This file is managed: local edits are overwritten on the next run.
+    write_file "$USER_HOME/.config/i3/config" 0644 <<'I3CONF'
+# Managed by uconsole-setup.sh -- edits here are overwritten on the next run.
+
 set $mod Mod4
+
+# 12pt is a starting point for the 5" 720p panel (~290 DPI); raise if small.
 font pango:Atkinson Hyperlegible Mono 12
+
+# --- launching --------------------------------------------------------------
 bindsym $mod+Return exec alacritty
-bindsym $mod+d exec dmenu_run
+bindsym $mod+t      exec alacritty
+bindsym $mod+d      exec dmenu_run
 bindsym $mod+Shift+q kill
+
+# --- focus ------------------------------------------------------------------
+bindsym $mod+h focus left
+bindsym $mod+j focus down
+bindsym $mod+k focus up
+bindsym $mod+l focus right
+bindsym $mod+Left  focus left
+bindsym $mod+Down  focus down
+bindsym $mod+Up    focus up
+bindsym $mod+Right focus right
+
+# --- moving -----------------------------------------------------------------
+bindsym $mod+Shift+h move left
+bindsym $mod+Shift+j move down
+bindsym $mod+Shift+k move up
+bindsym $mod+Shift+l move right
+bindsym $mod+Shift+Left  move left
+bindsym $mod+Shift+Down  move down
+bindsym $mod+Shift+Up    move up
+bindsym $mod+Shift+Right move right
+
+# --- layout -----------------------------------------------------------------
+# The panel is wide and short, so default to side-by-side splits.
+bindsym $mod+b split h
+bindsym $mod+v split v
+bindsym $mod+f fullscreen toggle
+bindsym $mod+s layout stacking
+bindsym $mod+w layout tabbed
+bindsym $mod+e layout toggle split
+bindsym $mod+Shift+space floating toggle
+bindsym $mod+space focus mode_toggle
+bindsym $mod+a focus parent
+
+# --- workspaces -------------------------------------------------------------
+bindsym $mod+1 workspace number 1
+bindsym $mod+2 workspace number 2
+bindsym $mod+3 workspace number 3
+bindsym $mod+4 workspace number 4
+bindsym $mod+5 workspace number 5
+bindsym $mod+6 workspace number 6
+bindsym $mod+7 workspace number 7
+bindsym $mod+8 workspace number 8
+bindsym $mod+9 workspace number 9
+bindsym $mod+Shift+1 move container to workspace number 1
+bindsym $mod+Shift+2 move container to workspace number 2
+bindsym $mod+Shift+3 move container to workspace number 3
+bindsym $mod+Shift+4 move container to workspace number 4
+bindsym $mod+Shift+5 move container to workspace number 5
+bindsym $mod+Shift+6 move container to workspace number 6
+bindsym $mod+Shift+7 move container to workspace number 7
+bindsym $mod+Shift+8 move container to workspace number 8
+bindsym $mod+Shift+9 move container to workspace number 9
+
+# --- session ----------------------------------------------------------------
+bindsym $mod+Shift+c reload
 bindsym $mod+Shift+r restart
-I3MIN
-    fi
+bindsym $mod+Shift+e exec "i3-nagbar -t warning -m 'Exit i3?' -B 'Yes' 'i3-msg exit'"
 
-    # Appended bindings win: i3 uses the last binding declared for a key.
-    if ! grep -q 'uconsole-setup' "$i3dir/config" 2>/dev/null; then
-      $DRY_RUN || cat >> "$i3dir/config" <<'I3EXTRA'
-
-# --- uconsole-setup ---------------------------------------------------------
-# 12pt is a starting point for the 5" 720p panel, which is ~290 DPI; raise it
-# here if title bars and the status bar read too small.
-font pango:Atkinson Hyperlegible Mono 12
-bindsym $mod+Return exec alacritty
+# --- hardware keys ----------------------------------------------------------
 bindsym XF86MonBrightnessUp   exec brightnessctl set +10%
 bindsym XF86MonBrightnessDown exec brightnessctl set 10%-
-I3EXTRA
-      log "wrote $i3dir/config"
-    fi
+bindsym XF86AudioRaiseVolume  exec wpctl set-volume @DEFAULT_AUDIO_SINK@ 5%+
+bindsym XF86AudioLowerVolume  exec wpctl set-volume @DEFAULT_AUDIO_SINK@ 5%-
+bindsym XF86AudioMute         exec wpctl set-mute   @DEFAULT_AUDIO_SINK@ toggle
 
-    # Alacritty config, pulled from this same repo. Its theme import points at
-    # cytracom_light.toml, which is in neither the upstream alacritty-theme
-    # repo nor any local checkout, so the import is commented out and the
-    # built-in default colours are used. Uncomment once the file exists.
-    local aldir="$USER_HOME/.config/alacritty"
-    run mkdir -p "$aldir"
-    if $DRY_RUN; then
-      log "[dry-run] fetch alacritty.toml into $aldir"
-    elif curl -fsSL --max-time 20 \
-           "https://raw.githubusercontent.com/${GH_KEY_USER}/utils/main/alacritty.toml" \
-           -o "$aldir/alacritty.toml"; then
-      sed -i 's|^\( *\)\("~/.*themes.*\.toml"\)|\1# \2  # uconsole-setup: no such file|' \
-        "$aldir/alacritty.toml"
-      log "installed alacritty.toml (theme import disabled, using defaults)"
-    else
-      warn "could not fetch alacritty.toml — using alacritty defaults"
-    fi
+# --- resize -----------------------------------------------------------------
+# Escape only. Debian's default also binds a bare Return here, which is
+# exactly the kind of stray Enter binding this config avoids.
+mode "resize" {
+        bindsym h resize shrink width  10 px or 10 ppt
+        bindsym j resize grow   height 10 px or 10 ppt
+        bindsym k resize shrink height 10 px or 10 ppt
+        bindsym l resize grow   width  10 px or 10 ppt
+        bindsym Escape mode "default"
+}
+bindsym $mod+r mode "resize"
 
-    # Atkinson Hyperlegible Next and Mono. Debian's fonts-atkinson-hyperlegible
-    # is the original family only; Next and Mono are separate newer families
-    # and are not packaged, so take them from the upstream Google Fonts repos.
-    # alacritty.toml asks for "Atkinson Hyperlegible Mono", which is the family
-    # name shipped by the -next-mono repo.
-    local fontdir=/usr/local/share/fonts frepo dest tmpd
-    for frepo in atkinson-hyperlegible-next atkinson-hyperlegible-next-mono; do
-      dest="$fontdir/$frepo"
-      if [[ -d $dest ]]; then
-        log "fonts: $frepo already present"
-        continue
-      fi
-      if $DRY_RUN; then
-        log "[dry-run] install fonts from googlefonts/$frepo"
-        continue
-      fi
-      tmpd=$(mktemp -d)
-      if git clone --depth 1 "https://github.com/googlefonts/$frepo" "$tmpd" >/dev/null 2>&1 \
-         && compgen -G "$tmpd/fonts/otf/*.otf" >/dev/null; then
-        mkdir -p "$dest"
-        cp "$tmpd"/fonts/otf/*.otf "$dest"/
-        chmod 0644 "$dest"/*.otf
-        log "fonts: installed $frepo ($(ls "$dest" | wc -l | tr -d ' ') faces)"
-      else
-        warn "fonts: could not fetch googlefonts/$frepo"
-      fi
-      rm -rf "$tmpd"
-    done
-    # Point the generic families at Atkinson: Mono for monospace, Next for
-    # both proportional families. <prefer> puts these at the head of the
-    # substitution list without removing the existing fallbacks, so anything
-    # they lack a glyph for still resolves.
-    write_file /etc/fonts/local.conf 0644 <<'FONTCONF'
-<?xml version="1.0"?>
-<!DOCTYPE fontconfig SYSTEM "fonts.dtd">
-<!-- Managed by uconsole-setup.sh -->
-<fontconfig>
-  <alias>
-    <family>monospace</family>
-    <prefer><family>Atkinson Hyperlegible Mono</family></prefer>
-  </alias>
-  <alias>
-    <family>sans-serif</family>
-    <prefer><family>Atkinson Hyperlegible Next</family></prefer>
-  </alias>
-  <alias>
-    <family>serif</family>
-    <prefer><family>Atkinson Hyperlegible Next</family></prefer>
-  </alias>
-</fontconfig>
-FONTCONF
-
-    if ! $DRY_RUN; then
-      fc-cache -f >/dev/null 2>&1 || warn "fc-cache failed"
-      # Confirm the aliases actually resolve; a silent miss here means every
-      # generic-family lookup quietly falls back to DejaVu.
-      local generic resolved
-      for generic in monospace sans-serif serif; do
-        resolved=$(fc-match "$generic" 2>/dev/null | head -1)
-        case $resolved in
-          *Atkinson*) log "font: $generic -> $resolved" ;;
-          *) warn "font: $generic resolved to '$resolved', not Atkinson" ;;
-        esac
-      done
-    fi
+bar {
+        status_command i3status
+        position top
+        tray_output primary
+}
+I3CONF
+    log "wrote a managed i3 config (no bare Return bindings)"
 
     # i3status: Debian's default shows "ethernet" and "battery all", neither of
     # which reports anything here -- there is no wired NIC, and the uConsole
@@ -856,8 +844,19 @@ AUTOLOGIN
 
     if pkg_available hackergadgets-uconsole-aio-board; then
       log "vendor metapackage available — using it"
-      run apt-get install -y --install-recommends hackergadgets-uconsole-aio-board
-      AIO_VIA_PACKAGE=true
+      # Deliberately WITHOUT --install-recommends, despite the vendor guide
+      # saying to use it. Its Recommends are tar1090, sdrpp-brown and
+      # pygpsclient; tar1090 is an ADS-B stack that builds from source in its
+      # postinst (it depends on gcc, make, git, lighttpd, tk-dev) and starts
+      # readsb, which fails outright unless an RTL-SDR dongle is visible at
+      # install time. That failure leaves dpkg half-configured and, via apt's
+      # non-zero exit, aborted the whole run. Only Depends: rtl-sdr is needed.
+      if run apt-get install -y --no-install-recommends hackergadgets-uconsole-aio-board; then
+        AIO_VIA_PACKAGE=true
+      else
+        warn "hackergadgets-uconsole-aio-board failed to install — falling back to manual overlays"
+        note "The AIO metapackage failed. Check 'sudo dpkg --configure -a' output; the boot overlays were written by hand instead."
+      fi
     else
       log "vendor metapackage not in any configured repo — writing overlays by hand"
       note "hackergadgets-uconsole-aio-board was unavailable; boot config was written manually. If you later add Rex's ClockworkPi apt repo, the metapackage is the more maintainable path."

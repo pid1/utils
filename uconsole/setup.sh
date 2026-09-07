@@ -58,10 +58,9 @@ main() {
 
   # Rails brought up at boot. SDR needs USB as well: the RTL-SDR is an
   # internal USB device behind the AIO hub, so powering the SDR rail alone
-  # will not make it enumerate. GPS and LoRa are left off -- they draw
-  # continuously for hardware most sessions do not use -- and the README
-  # documents turning them on. Add GPS/LORA here to make them persistent.
-  local BOOT_RAILS=(SDR USB)
+  # will not make it enumerate. GPS is up because chrony disciplines the clock
+  # from it. LoRa stays off; add LORA here to make it persistent.
+  local BOOT_RAILS=(SDR USB GPS)
 
   local BEGIN_MARK='# >>> uconsole-setup >>>'
   local END_MARK='# <<< uconsole-setup <<<'
@@ -426,6 +425,42 @@ CRON
     run /usr/local/sbin/sync-github-keys || warn "initial key sync failed (network?); cron will retry"
     log "github key sync installed (${GH_KEY_USER}, every 5 min)"
 
+    # Key-only SSH. Guarded on a usable key actually being present: turning
+    # password auth off against an empty authorized_keys would leave the
+    # physical console as the only way in.
+    local ak="$USER_HOME/.ssh/authorized_keys"
+    if [[ -s $ak ]] && ssh-keygen -l -f "$ak" >/dev/null 2>&1; then
+      # KbdInteractiveAuthentication too: with it left on, PAM can still put
+      # up a password prompt even when PasswordAuthentication is no.
+      if grep -qs '^[[:space:]]*Include[[:space:]]\+/etc/ssh/sshd_config.d/\*.conf' /etc/ssh/sshd_config; then
+        write_file /etc/ssh/sshd_config.d/10-no-password.conf 0644 <<'SSHDNOPW'
+# Managed by uconsole/setup.sh
+PasswordAuthentication no
+KbdInteractiveAuthentication no
+SSHDNOPW
+      else
+        printf '%s\n' \
+          'PasswordAuthentication no' \
+          'KbdInteractiveAuthentication no' \
+          | apply_block /etc/ssh/sshd_config
+      fi
+
+      # Validate before reloading: a config sshd rejects would otherwise take
+      # the listener down on restart.
+      if $DRY_RUN; then
+        log "[dry-run] would disable SSH password authentication"
+      elif sshd -t 2>/dev/null; then
+        systemctl reload ssh 2>/dev/null || systemctl restart ssh 2>/dev/null || true
+        log "SSH password authentication disabled (keys only)"
+      else
+        warn "sshd rejected the config; password auth left enabled:"
+        sshd -t 2>&1 | sed 's/^/      /' >&2
+      fi
+    else
+      warn "not disabling SSH password auth: no usable key in $ak"
+      note "SSH password auth is still enabled because $ak held no usable key. Once 'ssh-keygen -l -f $ak' succeeds, re-run --only base."
+    fi
+
     # One command for routine upkeep: package updates plus a re-apply of this
     # script, which is idempotent and so only changes what has drifted or is
     # newly added. /usr/local/bin rather than sbin -- Debian keeps sbin off a
@@ -504,7 +539,7 @@ MAINT
       log "added $DESKTOP_USER to: ${present[*]}"
       note "Group changes need a full logout/login (or reboot) before they apply."
     note "Routine upkeep is one command: 'sudo maint' — apt update + full-upgrade + autoremove, then re-applies this script (idempotent, so only drift changes). 'sudo maint --dry-run' previews the config half."
-    note "SSH is listening on 22, keys synced from github.com/${GH_KEY_USER}.keys. Password auth is still enabled — turn it off in /etc/ssh/sshd_config once key login is confirmed working."
+    note "SSH is listening on 22, key-only (password auth disabled), keys synced from github.com/${GH_KEY_USER}.keys every 5 minutes."
     fi
   fi
 
@@ -744,12 +779,27 @@ general {
         interval = 5
 }
 
+order += "battery 0"
 order += "cpu_usage"
 order += "memory"
 order += "cpu_temperature 0"
 order += "disk /"
 order += "wireless _first_"
 order += "tztime local"
+
+# The PMIC exposes the pack as axp20x-battery rather than BAT0, so the path is
+# given explicitly. It reports ENERGY_NOW/ENERGY_FULL and POWER_NOW, so
+# %remaining is meaningful while discharging.
+battery 0 {
+        format = "BAT %status %percentage %remaining"
+        format_down = "BAT n/a"
+        path = "/sys/class/power_supply/axp20x-battery/uevent"
+        status_chr = "CHR"
+        status_bat = "DIS"
+        status_full = "FULL"
+        low_threshold = 20
+        threshold_type = percentage
+}
 
 cpu_usage {
         format = "CPU %usage"
@@ -1141,10 +1191,59 @@ DEVICES="/dev/ttyS0"
 # -n polls the receiver without waiting for a client to connect.
 GPSD_OPTIONS="-n -s 9600"
 GPSD
+    # The service, not just the socket: socket activation only starts gpsd when
+    # a client connects to 2947, and chrony reads shared memory rather than
+    # that socket -- so under socket activation alone gpsd would never run and
+    # no time would ever reach chrony.
     run systemctl enable gpsd.socket
-    log "gpsd configured for /dev/ttyS0 @ 9600"
-    note "GPS: the overlays and gpsd are configured, but the GPS power rail is OFF by default — nothing will decode until you turn it on: sudo aiov2_ctl GPS on (see the README to make it persistent)."
-    note "For PPS-disciplined time, add to /etc/chrony/chrony.conf: refclock PPS /dev/pps0 refid PPS"
+    run systemctl enable --now gpsd.service || warn "gpsd.service would not start"
+    log "gpsd running against /dev/ttyS0 @ 9600"
+
+    # GPS-disciplined time. This matters off-grid: JS8 and FT8 need sub-second
+    # accuracy, which is exactly when there is no network to get it from.
+    apt_install chrony
+    # Only one thing may discipline the clock.
+    run systemctl disable --now systemd-timesyncd 2>/dev/null || true
+
+    local chrony_conf=/etc/chrony/chrony.conf
+    local chrony_drop=/etc/chrony/conf.d/10-uconsole-gps.conf
+    local chrony_target="$chrony_conf"
+    [[ -d /etc/chrony/conf.d ]] && chrony_target="$chrony_drop"
+
+    # rtcsync is in Debian's shipped chrony.conf; declaring it twice is a
+    # config error, so only add it when it is not already there.
+    local rtcsync_line=""
+    if ! grep -qs '^[[:space:]]*rtcsync' "$chrony_conf"; then
+      rtcsync_line=$'\n# Keep the battery-backed RTC in step, so the clock is right at boot\n# before any GPS fix or network.\nrtcsync'
+    fi
+
+    if [[ $chrony_target == "$chrony_drop" ]]; then
+      write_file "$chrony_drop" 0644 <<CHRONYGPS
+# Managed by uconsole/setup.sh — GPS-disciplined time.
+#
+# gpsd publishes NMEA time on SHM segment 0. That is only good to ~100 ms, so
+# it supplies coarse time while the kernel PPS device from the pps-gpio
+# overlay (GPIO 6) does the actual disciplining. 'lock NMEA' ties the PPS
+# pulses to NMEA's seconds so chrony knows which second each pulse belongs to.
+refclock SHM 0 refid NMEA offset 0.2 delay 0.2 poll 3
+refclock PPS /dev/pps0 refid PPS lock NMEA${rtcsync_line}
+CHRONYGPS
+    else
+      printf '%s\n' \
+        '# GPS-disciplined time: NMEA over gpsd shared memory for coarse time,' \
+        '# kernel PPS (pps-gpio on GPIO 6) for the actual disciplining.' \
+        'refclock SHM 0 refid NMEA offset 0.2 delay 0.2 poll 3' \
+        'refclock PPS /dev/pps0 refid PPS lock NMEA'"${rtcsync_line}" \
+        | apply_block "$chrony_conf"
+    fi
+
+    if ! $DRY_RUN; then
+      if chronyd -Q -f "$chrony_conf" >/dev/null 2>&1 || true; then :; fi
+      systemctl restart chrony 2>/dev/null || warn "chrony would not restart"
+    fi
+    log "chrony configured for GPS + PPS (wrote ${chrony_target})"
+    note "GPS time: after reboot check 'chronyc sources' — NMEA and PPS should both appear, PPS with a '*' once locked. 'ppstest /dev/pps0' proves the pulse itself."
+    note "GPS: needs the antenna on the 'GPS' IPEX pad and a clear sky view. The rail comes up at boot; check with 'cgps -s' or 'gpsmon'."
   fi
 
   # -------------------------------------------------------------------- lora

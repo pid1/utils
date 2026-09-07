@@ -1036,13 +1036,18 @@ AUTOLOGIN
       local rail
       local rail
       for rail in "${BOOT_RAILS[@]}"; do
+        # Current state, and separately the state applied at boot. These are
+        # distinct in aiov2_ctl: `aiov2_ctl SDR on` powers the rail now, while
+        # aiov2-rails-boot.service replays only what --boot-rail has recorded,
+        # so setting just the former leaves every rail dark after a reboot.
         run aiov2_ctl "$rail" on || warn "aiov2_ctl $rail on failed"
+        run aiov2_ctl --boot-rail "$rail" on || warn "could not set $rail to come up at boot"
       done
       # GPS and LoRa are deliberately not touched rather than forced off, so a
       # re-run does not undo a rail you switched on by hand.
       run systemctl enable aiov2-rails-boot.service \
         || warn "aiov2-rails-boot.service not found; rails may not persist across reboot"
-      log "power rails on via aiov2_ctl: ${BOOT_RAILS[*]} (GPS/LORA left as-is)"
+      log "power rails on now and at boot: ${BOOT_RAILS[*]} (others left as-is)"
     else
       # Fallback: raw pinctrl plus our own oneshot, so the board still comes
       # up with its rails on even without the vendor tooling.

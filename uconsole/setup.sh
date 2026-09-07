@@ -752,9 +752,10 @@ assign [class="(?i)^js8call$"] workspace number 2
 # on. for_window fires once the window is mapped and titled instead.
 for_window [title="^Meshtastic"] move to workspace number 3
 
+# Only SDR++ starts on its own. JS8Call and the Meshtastic dashboard keep
+# their placement rules above, so they land on 2 and 3 whenever started --
+# from dmenu, or via `mesh`, which also brings meshtasticd up.
 exec --no-startup-id sdrpp
-exec --no-startup-id js8call
-exec --no-startup-id meshtastic-ui
 
 bar {
         status_command i3status
@@ -871,7 +872,11 @@ order += "tztime local"
 # given explicitly. It reports ENERGY_NOW/ENERGY_FULL and POWER_NOW, so
 # %remaining is meaningful while discharging.
 battery 0 {
-        format = "BAT %status %percentage %remaining"
+        # No %remaining: it reads 00:00 whenever the pack is charging or full,
+        # which is most of the time on a device that is usually plugged in.
+        # format_percentage drops the two decimal places i3status defaults to.
+        format = "BAT %status %percentage"
+        format_percentage = "%.00f%s"
         format_down = "BAT n/a"
         path = "/sys/class/power_supply/axp20x-battery/uevent"
         # Without this i3status divides ENERGY_NOW (uWh) by CHARGE_FULL_DESIGN
@@ -905,12 +910,12 @@ disk "/" {
 }
 
 wireless _first_ {
-        format_up = "WIFI %quality %essid"
-        format_down = "WIFI down"
+        format_up = "%essid %quality"
+        format_down = "no wifi"
 }
 
 tztime local {
-        format = "%Y-%m-%d %H:%M"
+        format = "%H:%M"
 }
 I3STATUS
     log "wrote i3status config (CPU/RAM/temp/disk/wifi/clock)"
@@ -1422,8 +1427,9 @@ MESHYAML
 
     # aiov2_ctl owns whether meshtasticd starts at boot; going through
     # systemctl as well would give two things an opinion about it.
+    # meshtasticd is started on demand by `mesh`, not at boot.
     if command -v aiov2_ctl >/dev/null 2>&1; then
-      run aiov2_ctl --mesh-on-boot on || warn "could not set meshtasticd to start at boot"
+      run aiov2_ctl --mesh-on-boot off || warn "could not stop meshtasticd starting at boot"
     elif [[ -f /lib/systemd/system/meshtasticd.service ]] || $DRY_RUN; then
       run systemctl daemon-reload
       run systemctl enable meshtasticd || warn "could not enable meshtasticd"
@@ -1497,6 +1503,53 @@ MESHYAML
 
     # Deliberately not set: transmitting on the wrong region is a regulatory
     # problem, not a config annoyance.
+    # `mesh` brings the whole stack up in one step, and appears in dmenu by
+    # virtue of being on PATH. meshtasticd does not run at boot, so the UI
+    # alone would show a dashboard with nothing behind it.
+    write_file /usr/local/bin/mesh 0755 <<'MESHLAUNCH'
+#!/bin/bash
+# Managed by uconsole/setup.sh — start meshtasticd, then the dashboard.
+set -euo pipefail
+
+fail() {
+    # Launched from dmenu there is no terminal to print to, so surface
+    # failures where they can actually be seen.
+    if [ -n "${DISPLAY:-}" ] && command -v i3-nagbar >/dev/null 2>&1; then
+        i3-nagbar -t error -m "mesh: $1" >/dev/null 2>&1 &
+    fi
+    echo "mesh: $1" >&2
+    exit 1
+}
+
+if ! systemctl is-active --quiet meshtasticd; then
+    sudo -n systemctl start meshtasticd 2>/dev/null         || fail "could not start meshtasticd (sudo rule missing?)"
+    # The radio needs a moment to initialise before the UI can attach.
+    for _ in $(seq 1 30); do
+        systemctl is-active --quiet meshtasticd && break
+        sleep 1
+    done
+    systemctl is-active --quiet meshtasticd || fail "meshtasticd did not come up"
+fi
+
+exec meshtastic-ui "$@"
+MESHLAUNCH
+    log "installed the 'mesh' launcher"
+
+    # Exactly one command, for one unit, without a password. Validated before
+    # installing: a malformed drop-in makes sudo refuse to run at all.
+    if ! $DRY_RUN; then
+      local sudo_tmp; sudo_tmp=$(mktemp)
+      printf '%s ALL=(root) NOPASSWD: /usr/bin/systemctl start meshtasticd
+'         "$DESKTOP_USER" > "$sudo_tmp"
+      if visudo -cqf "$sudo_tmp" 2>/dev/null; then
+        install -m 0440 -o root -g root "$sudo_tmp" /etc/sudoers.d/50-meshtasticd
+        log "sudo rule installed: $DESKTOP_USER may start meshtasticd"
+      else
+        warn "sudoers snippet failed validation; not installed"
+      fi
+      rm -f "$sudo_tmp"
+    fi
+
     # Offline map tiles for meshtastic-ui, in the SD-card layout its bundles
     # use: maps/<style>/z/x/y.png. They live under the portduino emulated
     # filesystem root, ~/.portduino/default, with /maps symlinked to the same
@@ -1524,7 +1577,7 @@ MESHYAML
       run ln -sfn "$mapdir" /maps
     fi
 
-    note "Meshtastic dashboard is 'meshtastic-ui' (workspace 3). Node state: meshtastic --host localhost --info"
+    note "Meshtastic: run 'mesh' (in dmenu, Alt+Shift+d) — it starts meshtasticd and opens the dashboard on workspace 3. Neither runs at boot. Node state: meshtastic --host localhost --info"
     note "Map tiles cover zoom 1-6 worldwide. For detail around home, fetch a regional bundle from https://download.tiles.coalition.space/ and unzip it into ~/.portduino/default/ keeping the maps/<style>/z/x/y layout."
   fi
 

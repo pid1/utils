@@ -368,11 +368,22 @@ streets. For detail around home, take a regional bundle from
 
 i3 launches three apps and places them:
 
-| Workspace | Application |
-|---|---|
-| 1 | SDR++Brown |
-| 2 | JS8Call |
-| 3 | `meshtastic-ui` |
+| Workspace | Application | At boot |
+|---|---|---|
+| 1 | SDR++Brown | launched |
+| 2 | JS8Call | placement only |
+| 3 | `meshtastic-ui` | placement only |
+
+Only SDR++ starts on its own. JS8Call and the dashboard keep their placement
+rules, so they land on 2 and 3 whenever started — `Alt+2` and `Alt+3` reach
+those workspaces at any time, whether or not anything is on them.
+
+`meshtasticd` does not run at boot either. **`mesh`** starts the daemon, waits
+for the radio, and opens the dashboard — run it from dmenu (`Alt+Shift+d`).
+It uses a sudo rule scoped to exactly `systemctl start meshtasticd`, installed
+at `/etc/sudoers.d/50-meshtasticd` and validated with `visudo -c` before being
+put in place. Failures surface through `i3-nagbar`, since dmenu gives it no
+terminal to print to.
 
 Two quirks the rules work around. SDR++Brown puts its version and build date
 *inside* `WM_CLASS`, so the rule matches a `^sdr` prefix rather than the whole

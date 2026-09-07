@@ -794,6 +794,10 @@ battery 0 {
         format = "BAT %status %percentage %remaining"
         format_down = "BAT n/a"
         path = "/sys/class/power_supply/axp20x-battery/uevent"
+        # Without this i3status divides ENERGY_NOW (uWh) by CHARGE_FULL_DESIGN
+        # (uAh) -- different units, and the result reads several hundred
+        # percent. last_full_capacity makes it use ENERGY_FULL as denominator.
+        last_full_capacity = true
         status_chr = "CHR"
         status_bat = "DIS"
         status_full = "FULL"

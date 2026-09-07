@@ -1442,11 +1442,11 @@ MESHYAML
 
     # Deliberately not set: transmitting on the wrong region is a regulatory
     # problem, not a config annoyance.
-    # Offline map tiles for meshtastic-ui. It reads them from the portduino
-    # emulated filesystem, whose root for a user-run process is
-    # ~/.portduino/default -- so the SD-card layout the upstream bundles
-    # assume, /maps/<style>/z/x/y.png, lands there. A symlink at /maps covers
-    # the build looking at a literal absolute path instead.
+    # Offline map tiles for meshtastic-ui, in the SD-card layout its bundles
+    # use: maps/<style>/z/x/y.png. They live under the portduino emulated
+    # filesystem root, ~/.portduino/default, with /maps symlinked to the same
+    # tree so the path resolves whether it is read through the emulated
+    # filesystem or as an absolute one.
     local mapdir="$USER_HOME/.portduino/default/maps"
     if [[ -d $mapdir ]] && [[ -n $(find "$mapdir" -name '*.png' -print -quit 2>/dev/null) ]]; then
       log "map tiles already installed ($mapdir)"

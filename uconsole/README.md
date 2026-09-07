@@ -334,6 +334,19 @@ The CLI lives in a venv at `/opt/meshtastic-cli`, symlinked to
 `/usr/local/bin/meshtastic` — there is no Debian package, and bookworm marks
 the system interpreter externally-managed.
 
+### Map tiles
+
+`meshtastic-ui` ships with no tiles. The `osm` bundle from
+`meshtastic/device-ui` is installed to `~/.portduino/default/maps/` — the
+portduino emulated filesystem root — in the SD-card layout it expects,
+`maps/<style>/z/x/y.png`, with `/maps` symlinked to the same tree. `MAP_STYLE`
+selects `positron`, `atlas` or `dark-matter-brown` instead.
+
+That covers **zoom 1–6 worldwide**, which is country-level rather than
+streets. For detail around home, take a regional bundle from
+<https://download.tiles.coalition.space/> and unzip it into
+`~/.portduino/default/` keeping the same layout.
+
 ## Applications at login
 
 i3 launches three apps and places them:

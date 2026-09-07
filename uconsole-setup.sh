@@ -1107,12 +1107,30 @@ blacklist rtl2830
 BLACKLIST
     log "blacklisted the DVB-T kernel drivers"
 
-    if pkg_available sdrpp; then
+    # SDR++Brown rather than mainline SDR++, chosen for this hardware. The
+    # deciding factor is the waterfall: the fork does not re-upload a full
+    # image to the GPU every frame, and its zoom/regeneration is vectorised
+    # and multithreaded, which is where a CM4 actually hurts. It also adds
+    # wideband + audio noise reduction (useful on HF), FT8/FT4 decode with PSK
+    # reporter, a DSD decoder, and remote KiwiSDR. It is also simply newer
+    # (1.2.1.1 vs 1.1.0).
+    #
+    # Its small-screen work is Android/touch-specific and does NOT apply here.
+    #
+    # Caveat: the fork's own README says to prefer upstream for stability.
+    # Set SDR_APP=sdrpp to go back -- it declares Conflicts: sdrpp, so apt
+    # swaps between them cleanly in either direction.
+    local SDR_APP=sdrpp-brown
+    if pkg_available "$SDR_APP"; then
+      apt_install "$SDR_APP"
+      log "installed $SDR_APP (replaces mainline sdrpp if present)"
+    elif pkg_available sdrpp; then
+      warn "$SDR_APP unavailable — falling back to mainline sdrpp"
       apt_install sdrpp
       log "installed sdrpp"
     else
-      warn "sdrpp not in any configured repo"
-      note "SDR++ (sdrpp) was unavailable — it ships in Rex's ClockworkPi Bookworm repo. Add that repo and 'apt install sdrpp', or grab a release from https://github.com/AlexandreRouma/SDRPlusPlus/releases"
+      warn "no SDR++ package in any configured repo"
+      note "Neither sdrpp-brown nor sdrpp was available — both ship in Rex's ClockworkPi repo. Otherwise build from https://github.com/sannysanoff/SDRPlusPlusBrown"
     fi
     # Carry gqrx bookmarks over. gqrx and its config are left completely
     # alone — this only copies data into SDR++, and takes a tarball besides.

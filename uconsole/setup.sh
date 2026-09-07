@@ -42,6 +42,9 @@ main() {
   # Meshtastic will not transmit until a region is set. Wrong region is a
   # regulatory problem, so this is explicit rather than guessed.
   local LORA_REGION=US
+  # Offline map style for meshtastic-ui; bundles live in meshtastic/device-ui.
+  # Alternatives: positron, atlas, dark-matter-brown.
+  local MAP_STYLE=osm
   local AIOV2_REPO=https://github.com/hackergadgets/aiov2_ctl.git
   local AIOV2_DIR=/opt/aiov2_ctl
   local MESHTASTIC_REPO=http://download.opensuse.org/repositories/network:/Meshtastic:/beta/Raspbian_12/
@@ -1415,7 +1418,35 @@ MESHYAML
 
     # Deliberately not set: transmitting on the wrong region is a regulatory
     # problem, not a config annoyance.
+    # Offline map tiles for meshtastic-ui. It reads them from the portduino
+    # emulated filesystem, whose root for a user-run process is
+    # ~/.portduino/default -- so the SD-card layout the upstream bundles
+    # assume, /maps/<style>/z/x/y.png, lands there. A symlink at /maps covers
+    # the build looking at a literal absolute path instead.
+    local mapdir="$USER_HOME/.portduino/default/maps"
+    if [[ -d $mapdir ]] && [[ -n $(find "$mapdir" -name '*.png' -print -quit 2>/dev/null) ]]; then
+      log "map tiles already installed ($mapdir)"
+    elif $DRY_RUN; then
+      log "[dry-run] download and install meshtastic map tiles"
+    else
+      apt_install_opt unzip
+      local mz; mz=$(mktemp /tmp/osm-tiles.XXXXXX.zip)
+      if curl -fsSL --max-time 300 \
+           "https://raw.githubusercontent.com/meshtastic/device-ui/master/maps/${MAP_STYLE}.zip" \
+           -o "$mz" && unzip -qo "$mz" -d "$USER_HOME/.portduino/default/"; then
+        chown -R "${DESKTOP_USER}:${USER_GROUP}" "$USER_HOME/.portduino"
+        log "installed map tiles: $(find "$mapdir" -name '*.png' | wc -l | tr -d ' ') tiles"
+      else
+        warn "could not install map tiles"
+      fi
+      rm -f "$mz"
+    fi
+    if [[ -d $mapdir ]] && [[ ! -e /maps ]]; then
+      run ln -sfn "$mapdir" /maps
+    fi
+
     note "Meshtastic dashboard is 'meshtastic-ui' (workspace 3). Node state: meshtastic --host localhost --info"
+    note "Map tiles cover zoom 1-6 worldwide. For detail around home, fetch a regional bundle from https://download.tiles.coalition.space/ and unzip it into ~/.portduino/default/ keeping the maps/<style>/z/x/y layout."
   fi
 
   # --------------------------------------------------------------------- sdr

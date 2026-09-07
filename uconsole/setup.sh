@@ -485,8 +485,12 @@ SSHDNOPW
 # Arguments pass through to setup.sh, so --only/--skip work here too.
 set -euo pipefail
 
-PRIMARY=https://pid1.space/cpi
-FALLBACK=https://raw.githubusercontent.com/pid1/utils/main/uconsole/setup.sh
+# Source of truth first. pid1.space/cpi is a mirror republished by a workflow;
+# if that workflow ever breaks it freezes at its last successful publish and
+# keeps serving it, so preferring it here would silently apply a stale config
+# forever. It stays as the fallback for when GitHub is unreachable.
+PRIMARY=https://raw.githubusercontent.com/pid1/utils/main/uconsole/setup.sh
+FALLBACK=https://pid1.space/cpi
 
 if [ "$(id -u)" -ne 0 ]; then
     echo "maint: needs root — run: sudo maint $*" >&2
@@ -508,10 +512,21 @@ apt-get autoremove --purge -y
 echo
 echo "== configuration"
 tmp=$(mktemp)
+src=""
 trap 'rm -f "$tmp"' EXIT
 
-if curl -fsSL --max-time 30 "$PRIMARY" -o "$tmp" \
-   || curl -fsSL --max-time 30 "$FALLBACK" -o "$tmp"; then
+if curl -fsSL --max-time 30 "$PRIMARY" -o "$tmp"; then
+    src=$PRIMARY
+elif curl -fsSL --max-time 30 "$FALLBACK" -o "$tmp"; then
+    src=$FALLBACK
+    echo "maint: primary unreachable, used the mirror — it may lag" >&2
+fi
+
+if [ -s "$tmp" ]; then
+    # Say what is being applied, so a wrong or stale copy is visible rather
+    # than inferred from behaviour.
+    echo "  source: $src"
+    echo "  sha256: $(sha256sum "$tmp" | cut -c1-16)  ($(wc -l < "$tmp") lines)"
     # Downloaded to a file rather than piped, so a truncated transfer is caught
     # here instead of part-executing. Same checks the publish workflow applies:
     # the body lives inside main(), so a file missing its trailing invocation

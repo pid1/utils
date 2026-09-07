@@ -1285,7 +1285,7 @@ BLACKLIST
             for svc in readsb dump1090-fa dump1090 dump1090-mutability adsbexchange-feed skyaware978; do
               if systemctl is-active --quiet "$svc" 2>/dev/null; then
                 warn "  '$svc' is running and holds the SDR: sudo systemctl disable --now $svc"
-                note "The '$svc' service holds the RTL-SDR. It is an ADS-B decoder and restarts itself, so disable it: sudo systemctl disable --now $svc  (and 'sudo apt purge $svc' if unwanted)."
+                note "The '$svc' service holds the RTL-SDR. It is an ADS-B decoder that restarts itself, so disable and mask it: sudo systemctl disable --now $svc && sudo systemctl mask $svc. Note readsb is NOT a dpkg package — tar1090's postinst builds it into /usr/bin, so 'apt purge' will not remove it."
               fi
             done
             warn "  otherwise:  pgrep -a sdrpp   |   sudo fuser -v /dev/bus/usb/*/*"

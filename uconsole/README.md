@@ -268,10 +268,30 @@ restarts itself and reclaims the dongle, so killing the process is not enough:
 
 ```bash
 sudo systemctl disable --now readsb
-sudo apt purge -y readsb tar1090      # if you do not want ADS-B at all
+sudo systemctl mask readsb            # cannot be silently re-enabled
 ```
 
+**`readsb` is not a dpkg package**, so `apt purge readsb` does nothing:
+`tar1090`'s postinst builds it from source into `/usr/bin/readsb`. Masking the
+unit is the reliable way to keep it off the dongle.
+
 For the kernel driver, `sudo modprobe -r dvb_usb_rtl28xxu`.
+
+### If you hit the old `--install-recommends` bug
+
+Earlier versions installed the AIO metapackage with `--install-recommends`,
+which pulled in `tar1090` and with it an ADS-B stack. Two things survive a
+`tar1090` purge:
+
+```bash
+sudo systemctl disable --now lighttpd   # left listening on 0.0.0.0:80
+sudo systemctl mask readsb              # built outside dpkg, claims the SDR
+sudo ss -tlnp | grep ':80 '             # confirm nothing is serving
+```
+
+`lighttpd` is worth checking specifically — it is enabled at boot and binds all
+interfaces, which is not something you want on a device that joins networks you
+do not control.
 
 The blacklist in `/etc/modprobe.d/blacklist-dvb-rtl.conf` stops it loading at
 boot, but a module already loaded stays loaded until unloaded or rebooted.

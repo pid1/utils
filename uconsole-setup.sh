@@ -72,6 +72,7 @@ main() {
 
   local GH_KEY_USER=pid1
   local DEFAULT_USER=jroemer
+  local TIMEZONE=America/Chicago   # US/Central; America/Chicago is the canonical name
   local AIOV2_REPO=https://github.com/hackergadgets/aiov2_ctl.git
   local AIOV2_DIR=/opt/aiov2_ctl
   local MESHTASTIC_REPO=http://download.opensuse.org/repositories/network:/Meshtastic:/beta/Raspbian_12/
@@ -346,6 +347,21 @@ main() {
   if want base; then
     section "Base system"
 
+    # US/Central. Also matters beyond the clock display: JS8Call and the RTC
+    # both care, and gpsd/chrony will be feeding real time in shortly.
+    if command -v timedatectl >/dev/null 2>&1; then
+      local current_tz
+      current_tz=$(timedatectl show -p Timezone --value 2>/dev/null || echo "")
+      if [[ $current_tz == "$TIMEZONE" ]]; then
+        log "timezone already $TIMEZONE"
+      else
+        run timedatectl set-timezone "$TIMEZONE"
+        log "timezone set to $TIMEZONE (was ${current_tz:-unknown})"
+      fi
+    else
+      warn "timedatectl not found — timezone unchanged"
+    fi
+
     run touch /root/.hushlogin
     run install -o "$DESKTOP_USER" -g "$USER_GROUP" -m 0644 /dev/null "$USER_HOME/.hushlogin"
     log "hushlogin set for root and $DESKTOP_USER"
@@ -577,6 +593,54 @@ FONTCONF
       done
     fi
 
+    # i3status: Debian's default shows "ethernet" and "battery all", neither of
+    # which reports anything here -- there is no wired NIC, and the uConsole
+    # battery is not exposed as a standard power_supply device. Replaced with
+    # labelled CPU, RAM and temperature so the numbers are identifiable.
+    write_file "$USER_HOME/.config/i3status/config" 0644 <<'I3STATUS'
+# Managed by uconsole-setup.sh
+general {
+        colors = true
+        interval = 5
+}
+
+order += "cpu_usage"
+order += "memory"
+order += "cpu_temperature 0"
+order += "disk /"
+order += "wireless _first_"
+order += "tztime local"
+
+cpu_usage {
+        format = "CPU %usage"
+}
+
+memory {
+        format = "RAM %used / %total"
+        threshold_degraded = "10%"
+        format_degraded = "RAM LOW %available"
+}
+
+cpu_temperature 0 {
+        format = "TEMP %degrees°C"
+        path = "/sys/class/thermal/thermal_zone0/temp"
+}
+
+disk "/" {
+        format = "SD %avail"
+}
+
+wireless _first_ {
+        format_up = "WIFI %quality %essid"
+        format_down = "WIFI down"
+}
+
+tztime local {
+        format = "%Y-%m-%d %H:%M"
+}
+I3STATUS
+    log "wrote i3status config (CPU/RAM/temp/disk/wifi/clock)"
+
     # Start X on tty1 only. The panel is mounted rotated, so it comes up
     # portrait and needs a transform; detect at runtime rather than assume,
     # because some images already apply it at the DRM level and rotating a
@@ -624,6 +688,7 @@ AUTOLOGIN
 
     log "i3 + X11 configured, autologin on tty1 as $DESKTOP_USER"
     note "Desktop: tty1 autologins as $DESKTOP_USER and starts i3. Mod key is Super; Mod+Return is a terminal, Mod+d is dmenu."
+    note "i3status now shows labelled CPU, RAM, temperature, disk and wifi; ethernet and battery are gone. Config: ~/.config/i3status/config (Mod+Shift+r reloads i3)."
     note "Fonts: monospace -> Atkinson Hyperlegible Mono, serif/sans-serif -> Atkinson Hyperlegible Next, via /etc/fonts/local.conf. i3 uses Mono at 12pt (~/.config/i3/config); raise it if it reads small on the 5\" panel."
     note "Desktop: screen rotation is detected at X startup, so it is a no-op if the image already rotates the panel. If it lands sideways, edit ~/.xinitrc."
     note "Wi-Fi on a Lite image: 'sudo raspi-config' (System Options -> Wireless LAN), or nmtui if NetworkManager is in use."

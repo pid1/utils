@@ -181,6 +181,31 @@ main() {
 
   apt_install() { run apt-get install -y "$@"; }
 
+  # apt refuses to update a repo whose Release metadata changed, until the
+  # change is confirmed. Two benign ones show up here: Debian bumping Version
+  # across point releases (12.13 -> 12.15), and Rex relabelling his repo. Both
+  # are accepted narrowly by field.
+  #
+  # Origin, Codename and Suite are deliberately NOT accepted: those indicate
+  # the repository is claiming to be something other than what it was, which is
+  # the case apt-secure(8) actually exists to stop. Confirm those by hand.
+  #
+  # Non-fatal: one third-party repo failing should not abort provisioning, and
+  # the error stays visible above the warning.
+  # Reports apt's real exit status, so callers that need to roll back can.
+  apt_update() {
+    run apt-get update -y \
+      --allow-releaseinfo-change-version \
+      --allow-releaseinfo-change-label
+  }
+
+  # Never fatal: one third-party repo failing should not abort provisioning,
+  # and apt's own error stays visible above the warning.
+  apt_update_soft() {
+    apt_update || warn "apt-get update reported errors (see above); continuing anyway"
+    return 0
+  }
+
   # Replace our marker-delimited block in a file, or append it if absent.
   apply_block() {
     local file=$1 content stripped
@@ -222,12 +247,12 @@ main() {
     printf 'deb [arch=arm64 signed-by=%s] %s stable main\n' \
       "$AKREX_KEYRING" "$AKREX_BASE" > "$AKREX_LIST"
 
-    if apt-get update -y; then
+    if apt_update; then
       log "ak-rex repo added (sdrpp, hackergadgets AIO, pinctrl, rtl-sdr)"
     else
       warn "apt update failed after adding the ak-rex repo — removing it again"
       rm -f "$AKREX_LIST" "$AKREX_KEYRING"
-      apt-get update -y || true
+      apt_update_soft
     fi
   }
 
@@ -314,7 +339,7 @@ main() {
   log "boot files backed up with suffix .bak-${STAMP}"
 
   export DEBIAN_FRONTEND=noninteractive
-  run apt-get update -y
+  apt_update_soft
 
   # -------------------------------------------------------------------- base
 
@@ -876,7 +901,7 @@ GPSD
           chmod 0644 /etc/apt/keyrings/meshtastic.gpg
           printf 'deb [signed-by=/etc/apt/keyrings/meshtastic.gpg] %s /\n' "$MESHTASTIC_REPO" \
             > /etc/apt/sources.list.d/meshtastic.list
-          apt-get update -y || warn "apt update failed after adding the Meshtastic repo"
+          apt_update_soft
         else
           warn "could not fetch the Meshtastic signing key"
         fi
@@ -1301,7 +1326,7 @@ JS8CONF
         curl -fsSL --max-time 30 "${ts_base}.tailscale-keyring.list" \
           -o /etc/apt/sources.list.d/tailscale.list \
           || die "could not fetch the Tailscale apt source"
-        apt-get update -y
+        apt_update_soft
       fi
     fi
 

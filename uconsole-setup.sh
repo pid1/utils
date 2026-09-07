@@ -473,21 +473,32 @@ CRON
     write_file "$USER_HOME/.config/i3/config" 0644 <<'I3CONF'
 # Managed by uconsole-setup.sh -- edits here are overwritten on the next run.
 
-# $mod is the uConsole's CMD key. Its firmware defines
-#   #define _CMD_KEY KEY_RIGHT_GUI      (Code/uconsole_keyboard/keymaps.ino)
-# which X sees as Super_R, i.e. mod4. RIGHT_GUI is the only GUI key the
-# keyboard emits -- there is no left Super -- so CMD is the one and only
-# modifier key for everything below. Confirm with: xmodmap -pm
-set $mod Mod4
+# $mod is Alt (Mod1). The uConsole's CMD key is reachable only as Fn+CMD --
+# a two-key chord for every window operation -- so Alt wins on ergonomics
+# despite the cost below.
+#
+# The cost: i3 grabs $mod combinations globally, so every plain Alt+<letter>
+# bound here is taken away from the shell, where readline uses Meta for word
+# motion. The bindings are therefore arranged to keep the ones worth keeping:
+#
+#   still available to bash:  Alt+b Alt+f Alt+d Alt+t Alt+u Alt+p Alt+y Alt+.
+#                             Alt+BackSpace  (word motion, kill-word, yank-arg)
+#   taken by i3:              Alt+h/j/k/l (focus), Alt+1..9 (workspaces),
+#                             Alt+r, Alt+Return
+#
+# That trades away readline's M-l (downcase-word), M-r (revert-line) and
+# M-<digit> (digit-argument), which are rare, and keeps everything common.
+# Window management otherwise lives on Alt+Shift.
+set $mod Mod1
 
 # 12pt is a starting point for the 5" 720p panel (~290 DPI); raise if small.
 font pango:Atkinson Hyperlegible Mono 12
 
 # --- launching --------------------------------------------------------------
-bindsym $mod+Return exec alacritty
-bindsym $mod+t      exec alacritty
-bindsym $mod+d      exec dmenu_run
-bindsym $mod+Shift+q kill
+bindsym $mod+Return       exec alacritty
+bindsym $mod+Shift+Return exec alacritty
+bindsym $mod+Shift+d      exec dmenu_run
+bindsym $mod+Shift+q      kill
 
 # --- focus ------------------------------------------------------------------
 bindsym $mod+h focus left
@@ -511,15 +522,14 @@ bindsym $mod+Shift+Right move right
 
 # --- layout -----------------------------------------------------------------
 # The panel is wide and short, so default to side-by-side splits.
-bindsym $mod+b split h
-bindsym $mod+v split v
-bindsym $mod+f fullscreen toggle
-bindsym $mod+s layout stacking
-bindsym $mod+w layout tabbed
-bindsym $mod+e layout toggle split
+bindsym $mod+Shift+b split h
+bindsym $mod+Shift+v split v
+bindsym $mod+Shift+f fullscreen toggle
+bindsym $mod+Shift+s layout stacking
+bindsym $mod+Shift+w layout tabbed
+bindsym $mod+Shift+e layout toggle split
 bindsym $mod+Shift+space floating toggle
-bindsym $mod+space focus mode_toggle
-bindsym $mod+a focus parent
+bindsym $mod+Shift+a focus parent
 
 # --- workspaces -------------------------------------------------------------
 bindsym $mod+1 workspace number 1
@@ -544,7 +554,7 @@ bindsym $mod+Shift+9 move container to workspace number 9
 # --- session ----------------------------------------------------------------
 bindsym $mod+Shift+c reload
 bindsym $mod+Shift+r restart
-bindsym $mod+Shift+e exec "i3-nagbar -t warning -m 'Exit i3?' -B 'Yes' 'i3-msg exit'"
+bindsym $mod+Shift+x exec "i3-nagbar -t warning -m 'Exit i3?' -B 'Yes' 'i3-msg exit'"
 
 # --- hardware keys ----------------------------------------------------------
 bindsym XF86MonBrightnessUp   exec brightnessctl set +10%
@@ -553,8 +563,9 @@ bindsym XF86MonBrightnessDown exec brightnessctl set 10%-
 # Automatic blanking is disabled (the panel does not survive DPMS), so this is
 # the deliberate way to kill the backlight on battery. Brightness-up restores
 # it; --save/--restore keeps the previous level.
-bindsym $mod+Shift+b exec --no-startup-id brightnessctl --save set 0
-bindsym $mod+Shift+n exec --no-startup-id brightnessctl --restore
+bindsym $mod+Shift+o exec --no-startup-id brightnessctl --save set 0
+bindsym $mod+Shift+p exec --no-startup-id brightnessctl --restore
+
 bindsym XF86AudioRaiseVolume  exec wpctl set-volume @DEFAULT_AUDIO_SINK@ 5%+
 bindsym XF86AudioLowerVolume  exec wpctl set-volume @DEFAULT_AUDIO_SINK@ 5%-
 bindsym XF86AudioMute         exec wpctl set-mute   @DEFAULT_AUDIO_SINK@ toggle
@@ -809,7 +820,7 @@ AUTOLOGIN
       "$USER_HOME/.config" "$USER_HOME/.xinitrc" "$USER_HOME/.bash_profile"
 
     log "i3 + X11 configured, autologin on tty1 as $DESKTOP_USER"
-    note "Desktop: tty1 autologins as $DESKTOP_USER and starts i3. Mod key is Super; Mod+Return is a terminal, Mod+d is dmenu."
+    note "Desktop: tty1 autologins as $DESKTOP_USER and starts i3. Mod is ALT: Alt+Return for a terminal, Alt+Shift+d for dmenu, Alt+Shift+q to close. Window management sits on Alt+Shift so bash keeps Alt+b/f/d/. for word motion."
     note "i3status now shows labelled CPU, RAM, temperature, disk and wifi; ethernet and battery are gone. Config: ~/.config/i3status/config (Mod+Shift+r reloads i3)."
     note "Fonts: monospace -> Atkinson Hyperlegible Mono, serif/sans-serif -> Atkinson Hyperlegible Next, via /etc/fonts/local.conf. i3 uses Mono at 12pt (~/.config/i3/config); raise it if it reads small on the 5\" panel."
     note "Display: blanking and power management are off at every layer — Xorg (10-no-blanking.conf), logind (IdleAction=ignore), the kernel console (consoleblank=0, needs the reboot) and xset in .xinitrc. Nothing locks or blanks the screen. Mod+Shift+b kills the backlight deliberately, Mod+Shift+n restores it."

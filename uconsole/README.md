@@ -309,11 +309,18 @@ cgps -s                       # GPS, once its rail is on
 `meshtasticd` drives the SX1262 over `/dev/spidev1.0`, created by the
 `spi1-1cs` overlay. `meshtastic-ui` is the dashboard, on workspace 3.
 
+Setting identity or config drops the client connection once the node applies
+it, so the CLI reports `BrokenPipeError` even on success. Read the value back
+rather than trusting the exit status.
+
 ```bash
 meshtastic --host localhost --info      # node, region, modem preset
 meshtastic --host localhost --nodes     # what the mesh can see
 systemctl status meshtasticd
 ```
+
+The node presents as **KA1PID (PID1)** on the mesh — `NODE_NAME` and
+`NODE_SHORT` in `setup.sh`; the short name is capped at 4 characters.
 
 Region is set to `US` (`LORA_REGION` in `setup.sh`). **Nothing transmits until
 a region is set**, and the wrong one is a regulatory problem rather than a

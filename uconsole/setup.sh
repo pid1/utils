@@ -42,6 +42,10 @@ main() {
   # Meshtastic will not transmit until a region is set. Wrong region is a
   # regulatory problem, so this is explicit rather than guessed.
   local LORA_REGION=US
+  # Node identity as it appears to everyone else on the mesh. Short name is
+  # capped at 4 characters.
+  local NODE_NAME=KA1PID
+  local NODE_SHORT=PID1
   # Offline map style for meshtastic-ui; bundles live in meshtastic/device-ui.
   # Alternatives: positron, atlas, dark-matter-brown.
   local MAP_STYLE=osm
@@ -1411,8 +1415,28 @@ MESHYAML
             warn "could not set the LoRa region; run: meshtastic --host localhost --set lora.region $LORA_REGION"
           fi
         fi
+        # Node identity. Read back rather than trusting the exit status: the
+        # node applies the change and then drops the connection, so the client
+        # reports a broken pipe even on success.
+        local owner
+        owner=$(timeout 40 "$mtcli/bin/meshtastic" --host localhost --info 2>/dev/null \
+                | grep -m1 "^Owner:") || owner=""
+        if [[ $owner == *"$NODE_NAME ($NODE_SHORT)"* ]]; then
+          log "node identity already $NODE_NAME ($NODE_SHORT)"
+        else
+          timeout 90 "$mtcli/bin/meshtastic" --host localhost \
+            --set-owner "$NODE_NAME" --set-owner-short "$NODE_SHORT" >/dev/null 2>&1 || true
+          sleep 8
+          owner=$(timeout 40 "$mtcli/bin/meshtastic" --host localhost --info 2>/dev/null \
+                  | grep -m1 "^Owner:") || owner=""
+          if [[ $owner == *"$NODE_NAME ($NODE_SHORT)"* ]]; then
+            log "node identity set to $NODE_NAME ($NODE_SHORT)"
+          else
+            warn "could not set the node identity; run: meshtastic --host localhost --set-owner $NODE_NAME --set-owner-short $NODE_SHORT"
+          fi
+        fi
       else
-        note "LoRa region is not set yet. Once meshtasticd is running: meshtastic --host localhost --set lora.region ${LORA_REGION}  — nothing transmits until it is."
+        note "LoRa region and node identity are not set yet. Once meshtasticd is running: meshtastic --host localhost --set lora.region ${LORA_REGION} --set-owner ${NODE_NAME} --set-owner-short ${NODE_SHORT}  — nothing transmits until the region is set."
       fi
     fi
 

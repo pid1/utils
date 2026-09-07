@@ -50,6 +50,13 @@ main() {
   # the board responds until these are driven high. (V1 had no such gating.)
   local RAIL_GPS=27 RAIL_LORA=16 RAIL_SDR=7 RAIL_USB=23
 
+  # Rails brought up at boot. SDR needs USB as well: the RTL-SDR is an
+  # internal USB device behind the AIO hub, so powering the SDR rail alone
+  # will not make it enumerate. GPS and LoRa are left off -- they draw
+  # continuously for hardware most sessions do not use -- and the README
+  # documents turning them on. Add GPS/LORA here to make them persistent.
+  local BOOT_RAILS=(SDR USB)
+
   local BEGIN_MARK='# >>> uconsole-setup >>>'
   local END_MARK='# <<< uconsole-setup <<<'
 
@@ -875,30 +882,64 @@ AUTOLOGIN
 
     if command -v aiov2_ctl >/dev/null 2>&1 || $DRY_RUN; then
       local rail
-      for rail in GPS LORA SDR USB; do
+      local rail
+      for rail in "${BOOT_RAILS[@]}"; do
         run aiov2_ctl "$rail" on || warn "aiov2_ctl $rail on failed"
       done
+      # GPS and LoRa are deliberately not touched rather than forced off, so a
+      # re-run does not undo a rail you switched on by hand.
       run systemctl enable aiov2-rails-boot.service \
         || warn "aiov2-rails-boot.service not found; rails may not persist across reboot"
-      log "power rails enabled via aiov2_ctl"
+      log "power rails on via aiov2_ctl: ${BOOT_RAILS[*]} (GPS/LORA left as-is)"
     else
       # Fallback: raw pinctrl plus our own oneshot, so the board still comes
       # up with its rails on even without the vendor tooling.
       apt_install pinctrl || apt_install raspi-utils || true
       write_file /usr/local/sbin/uconsole-aio-rails 0755 <<'RAILS'
 #!/bin/sh
-# Managed by uconsole/setup.sh — AIO v2 power rails (GPS/LoRa/SDR/USB hub).
+# Managed by uconsole/setup.sh — AIO v2 GPIO power rails.
+#
+#   usage: uconsole-aio-rails [on|off]           boot rails (SDR + USB hub)
+#          uconsole-aio-rails <RAIL> [on|off]    one rail by name
+#
+# Rails: GPS LORA SDR USB. Only the boot set comes up automatically; the
+# RTL-SDR needs USB too, being an internal USB device behind the AIO hub.
 set -eu
-STATE=${1:-on}
-case "$STATE" in
-    on)  LEVEL=dh ;;
-    off) LEVEL=dl ;;
-    *)   echo "usage: $0 [on|off]" >&2; exit 2 ;;
+
+rail_pin() {
+    case "$1" in
+        GPS)  echo __RAIL_GPS__ ;;
+        LORA) echo __RAIL_LORA__ ;;
+        SDR)  echo __RAIL_SDR__ ;;
+        USB)  echo __RAIL_USB__ ;;
+        *)    echo "unknown rail: $1 (GPS LORA SDR USB)" >&2; exit 2 ;;
+    esac
+}
+
+level_for() {
+    case "$1" in
+        on)  echo dh ;;
+        off) echo dl ;;
+        *)   echo "usage: $0 [RAIL] [on|off]" >&2; exit 2 ;;
+    esac
+}
+
+case "${1:-}" in
+    GPS|LORA|SDR|USB)
+        pin=$(rail_pin "$1")
+        lvl=$(level_for "${2:-on}")
+        pinctrl "$pin" op
+        pinctrl "$pin" "$lvl"
+        ;;
+    *)
+        lvl=$(level_for "${1:-on}")
+        for r in __BOOT_RAILS__; do
+            pin=$(rail_pin "$r")
+            pinctrl "$pin" op
+            pinctrl "$pin" "$lvl"
+        done
+        ;;
 esac
-for pin in __RAIL_GPS__ __RAIL_LORA__ __RAIL_SDR__ __RAIL_USB__; do
-    pinctrl "$pin" op
-    pinctrl "$pin" "$LEVEL"
-done
 RAILS
       if ! $DRY_RUN; then
         sed -i \
@@ -906,6 +947,7 @@ RAILS
           -e "s|__RAIL_LORA__|${RAIL_LORA}|" \
           -e "s|__RAIL_SDR__|${RAIL_SDR}|" \
           -e "s|__RAIL_USB__|${RAIL_USB}|" \
+          -e "s|__BOOT_RAILS__|${BOOT_RAILS[*]}|" \
           /usr/local/sbin/uconsole-aio-rails
       fi
       write_file /etc/systemd/system/uconsole-aio-rails.service 0644 <<'UNIT'
@@ -926,7 +968,7 @@ UNIT
       run systemctl daemon-reload
       run systemctl enable uconsole-aio-rails.service
       run /usr/local/sbin/uconsole-aio-rails on || warn "pinctrl rail enable failed (pinctrl missing?)"
-      log "power rails enabled via pinctrl fallback unit"
+      log "power rails on via pinctrl fallback unit: ${BOOT_RAILS[*]}"
     fi
   fi
 
@@ -1003,7 +1045,7 @@ GPSD_OPTIONS="-n -s 9600"
 GPSD
     run systemctl enable gpsd.socket
     log "gpsd configured for /dev/ttyS0 @ 9600"
-    note "GPS needs the antenna on the 'GPS' IPEX pad and a clear sky view; check with 'cgps -s' or 'gpsmon' after reboot."
+    note "GPS: the overlays and gpsd are configured, but the GPS power rail is OFF by default — nothing will decode until you turn it on: sudo aiov2_ctl GPS on (see the README to make it persistent)."
     note "For PPS-disciplined time, add to /etc/chrony/chrony.conf: refclock PPS /dev/pps0 refid PPS"
   fi
 
@@ -1074,6 +1116,7 @@ MESHYAML
 
     # Deliberately not set: transmitting on the wrong region is a regulatory
     # problem, not a config annoyance.
+    note "LoRa: the radio's power rail is OFF by default — turn it on with 'sudo aiov2_ctl LORA on' (see the README to make it persistent)."
     note "Meshtastic will not transmit until you set a LoRa region, e.g.: meshtastic --set lora.region US"
   fi
 
@@ -1313,7 +1356,7 @@ GQRXCONV
       note "gqrx bookmarks imported into SDR++ (Module list -> Frequency Manager). gqrx config untouched; tarball backup in \$HOME."
     fi
 
-    note "SDR needs the antenna on the 'SDR' IPEX pad; the dongle sits behind the internal USB rail."
+    note "SDR needs the antenna on the 'SDR' IPEX pad. The SDR and internal-USB rails come up at boot; GPS and LoRa do not — see the README for turning those on."
   fi
 
   # --------------------------------------------------------------------- ham

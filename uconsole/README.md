@@ -129,6 +129,60 @@ only `Alt+h/j/k/l`, `Alt+1..9`, `Alt+r` and `Alt+Return` — costing readline
 
 ---
 
+## Power rails
+
+AIO v2 gates each subsystem behind a GPIO-switched rail — nothing on the board
+responds until its rail is driven high. This is the main difference from V1,
+which had no such gating.
+
+| Rail | GPIO | At boot |
+|---|---|---|
+| `SDR` | 7 | **on** |
+| `USB` (internal hub) | 23 | **on** |
+| `GPS` | 27 | off |
+| `LORA` | 16 | off |
+
+**SDR and USB come up together on purpose.** The RTL-SDR is an internal USB
+device behind the AIO's hub, so powering the SDR rail alone will not make it
+enumerate — `rtl_test` would report no supported devices found.
+
+GPS and LoRa stay off: they draw continuously for hardware most sessions don't
+use. Everything else for them *is* configured — overlays, `gpsd`,
+`meshtasticd` — so they need only power.
+
+### Turning one on for this session
+
+```bash
+sudo aiov2_ctl GPS on          # or LORA, SDR, USB
+sudo aiov2_ctl GPS off
+```
+
+Without the vendor tool, the fallback installed here does the same:
+
+```bash
+sudo uconsole-aio-rails GPS on
+sudo uconsole-aio-rails            # just the boot set (SDR + USB)
+```
+
+### Making it persistent
+
+Edit `BOOT_RAILS` near the top of `setup.sh` and re-run `--only aio`:
+
+```bash
+local BOOT_RAILS=(SDR USB GPS)
+```
+
+A re-run never forces GPS or LoRa *off*, so a rail you switched on by hand
+survives until you reboot.
+
+### Checking
+
+```bash
+rtl_test -t                   # SDR enumerated
+pinctrl get 7                 # rail state directly
+cgps -s                       # GPS, once its rail is on
+```
+
 ## Display and power
 
 **Screen blanking, DPMS and idle actions are disabled at every layer** — Xorg
@@ -169,8 +223,8 @@ nothing until then.
 ```bash
 ls /dev/rtc* && dmesg | grep -i rtc   # RTC actually bound
 sudo hwclock -w                       # seed it once, when NTP time is good
-cgps -s                               # GPS (needs antenna + sky view)
-aiov2_ctl GPS on                      # rails survived the reboot
+rtl_test -t                           # SDR enumerated (its rail is on by default)
+sudo aiov2_ctl GPS on && cgps -s      # GPS rail is OFF by default
 claude                                # log in via browser prompt
 sudo tailscale up                     # unless TS_AUTHKEY was passed
 ```

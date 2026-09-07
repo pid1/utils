@@ -25,7 +25,7 @@
 # hand the flag to bash instead of to us:
 #
 #   curl -fsSL <url> | sudo bash -s -- --dry-run
-#   curl -fsSL <url> | sudo bash -s -- --skip games --skip lora
+#   curl -fsSL <url> | sudo bash -s -- --skip lora --skip tailscale
 #   curl -fsSL <url> | sudo bash -s -- --only sdr --user someone
 #
 # sudo scrubs the environment, so TS_AUTHKEY must be set *after* sudo:
@@ -53,23 +53,24 @@
 #   3. Target is a microSD card. A CM4 *with* eMMC has no SD lines wired up and
 #      must be flashed over USB with rpiboot/usbboot instead; CM4 Lite uses SD.
 #
-#   4. First boot expands the filesystem and reboots by itself. Log in with the
-#      image's default account -- the forum thread is the authoritative source
-#      for it; sources disagree between pi/clockworkpi and clockwork/clockwork,
-#      so do not count on either -- then create your own account and drop the
-#      default one, which has a publicly known password:
-#      This script offers to do it for you: if the account is missing it
-#      prompts, and hands the password prompt to adduser itself, so no
-#      credential is ever typed into this script, echoed, or stored here.
-#      Verify you can log in as the new account and that sudo works BEFORE
-#      removing the default one:
+#   4. First boot expands the filesystem and reboots by itself, then runs a
+#      wizard that creates your user account -- so by the time this script
+#      runs, that account exists and it does not create users itself.
+#
+#      If the image instead drops you at a default account, the forum thread
+#      is the authoritative source for its credentials; published sources
+#      disagree (pi/clockworkpi vs clockwork/clockwork), so do not count on
+#      either. Create your own account, confirm you can log in and that sudo
+#      works, and only then remove the default one:
+#        sudo adduser jroemer && sudo adduser jroemer sudo
 #        sudo deluser --remove-home <default-user>
 #
-#   Rex's image ships his apt repo (github.com/ak-rex/akrex-arm-repo) already
-#   configured, which is where sdrpp and the HackerGadgets AIO metapackage come
-#   from rather than Debian. This script checks for that repo and adds it only
-#   if missing, so it also works on a stock Bookworm image. --no-akrex-repo
-#   opts out.
+#   This script targets Rex's image specifically. It assumes his apt repo is
+#   already configured -- that is where sdrpp-brown, the HackerGadgets AIO
+#   metapackage, pinctrl and the rtlsdrblog rtl-sdr build come from rather
+#   than Debian -- and verifies it rather than adding a copy. It also assumes
+#   the image ships no games or desktop, which is true of both the Lite and
+#   full builds, so there is nothing to strip out.
 # ---------------------------------------------------------------------------
 
 main() {
@@ -87,9 +88,6 @@ main() {
   # ships with. It is served straight out of a GitHub repo, and carries the
   # things Debian does not have: sdrpp, the hackergadgets AIO metapackage,
   # pinctrl, and the rtlsdrblog fork of rtl-sdr.
-  local AKREX_BASE=https://raw.githubusercontent.com/ak-rex/akrex-arm-repo/main/bookworm
-  local AKREX_KEYRING=/etc/apt/keyrings/ak-rex.gpg
-  local AKREX_LIST=/etc/apt/sources.list.d/ak-rex.list
   # Anthropic's release signing key, per code.claude.com/docs/en/setup.
   local CLAUDE_KEY_URL=https://downloads.claude.ai/keys/claude-code.asc
   local CLAUDE_KEY=/etc/apt/keyrings/claude-code.asc
@@ -103,38 +101,21 @@ main() {
   local BEGIN_MARK='# >>> uconsole-setup >>>'
   local END_MARK='# <<< uconsole-setup <<<'
 
-  local ALL_SECTIONS=(base desktop claude games aio rtc gps lora sdr ham tailscale)
+  local ALL_SECTIONS=(base desktop claude aio rtc gps lora sdr ham tailscale)
 
-  # Game/emulator packages shipped in the stock uConsole image. This is an
-  # explicit allowlist rather than a `uconsole-*` glob on purpose: the kernel,
-  # 4G utils and keyboard firmware share those prefixes, and globbing them
-  # would take out your kernel updates along with Cave Story.
-  local GAME_PKGS=(
-    retroarch retroarch-assets retroarch-assets-xmb retroarch-assets-ozone
-    dosbox dosbox-staging
-    openttd openttd-data openttd-opengfx openttd-opensfx openttd-openmsx
-    devterm-tic80-cpi devterm-cavestory-cpi devterm-cavestory-cpi-cm4
-    uconsole-tic80 uconsole-cavestory uconsole-love2d uconsole-liko12
-    uconsole-lowresnx uconsole-dosbox-staging
-  )
-  # Belt-and-braces: nothing matching this may be purged, ever.
-  local DENY_RE='^(uconsole-kernel|uconsole[-_]4g|uconsole[-_]keyboard|clockworkpi-|devterm-kernel|raspberrypi-)'
-
-  # Hardware groups. The stock `cpi` account is preloaded into these; a fresh
-  # account is not, and none of the AIO peripherals work non-root without them.
+  # Hardware groups. The account created by the image's first-boot wizard is
+  # not in these, and no AIO peripheral works non-root without them.
   local HW_GROUPS=(dialout spi i2c gpio plugdev audio video netdev)
 
   # --------------------------------------------------------------- arg parse
 
   local DRY_RUN=false
-  local ADD_AKREX_REPO=true
   local DESKTOP_USER=""
   local -a ONLY=() SKIP=()
 
   while (( $# )); do
     case $1 in
       --dry-run)      DRY_RUN=true ;;
-      --no-akrex-repo) ADD_AKREX_REPO=false ;;
       --user)         DESKTOP_USER=${2:?--user needs a value}; shift ;;
       --user=*)       DESKTOP_USER=${1#*=} ;;
       --only)         ONLY+=("${2:?--only needs a section}"); shift ;;
@@ -142,7 +123,7 @@ main() {
       --skip)         SKIP+=("${2:?--skip needs a section}"); shift ;;
       --skip=*)       SKIP+=("${1#*=}") ;;
       -h|--help)
-        printf 'usage: uconsole-setup.sh [--dry-run] [--no-akrex-repo] [--user NAME] [--only SECTION]... [--skip SECTION]...\n'
+        printf 'usage: uconsole-setup.sh [--dry-run] [--user NAME] [--only SECTION]... [--skip SECTION]...\n'
         printf 'sections: %s\n' "${ALL_SECTIONS[*]}"
         return 0 ;;
       *) printf 'unknown argument: %s\n' "$1" >&2; return 2 ;;
@@ -236,45 +217,22 @@ main() {
       "$stripped" "$BEGIN_MARK" "$content" "$END_MARK" | write_file "$file" 0644
   }
 
-  local AKREX_DONE=false
-  ensure_akrex_repo() {
-    $ADD_AKREX_REPO || return 0
-    $AKREX_DONE && return 0
-    AKREX_DONE=true
-
-    # Already configured (Rex's own image ships it) — nothing to do.
-    if [[ -f $AKREX_LIST ]] || pkg_available sdrpp; then
-      log "ak-rex apt repo already available"
-      return 0
-    fi
-
-    section "Adding Rex's ClockworkPi apt repo"
-    if $DRY_RUN; then
-      log "[dry-run] add ${AKREX_BASE} stable main"
-      return 0
-    fi
-
-    mkdir -p /etc/apt/keyrings
-    if ! curl -fsSL --max-time 30 "${AKREX_BASE}/KEY.gpg" \
-         | gpg --dearmor --yes -o "$AKREX_KEYRING"; then
-      warn "could not fetch ak-rex signing key — continuing without the repo"
-      return 0
-    fi
-    chmod 0644 "$AKREX_KEYRING"
-
-    # signed-by scopes this key to this repo only. The upstream README drops
-    # the key in trusted.gpg.d, which would trust it for every configured
-    # repo; there is no reason to grant it that.
-    printf 'deb [arch=arm64 signed-by=%s] %s stable main\n' \
-      "$AKREX_KEYRING" "$AKREX_BASE" > "$AKREX_LIST"
-
-    if apt_update; then
-      log "ak-rex repo added (sdrpp, hackergadgets AIO, pinctrl, rtl-sdr)"
-    else
-      warn "apt update failed after adding the ak-rex repo — removing it again"
-      rm -f "$AKREX_LIST" "$AKREX_KEYRING"
-      apt_update_soft
-    fi
+  # Rex's image ships his apt repo already configured (it appears as
+  # ClockworkPi-apt), and that is where sdrpp-brown, the HackerGadgets AIO
+  # metapackage, pinctrl and the rtlsdrblog rtl-sdr build come from. This
+  # script targets that image, so it verifies the repo is there rather than
+  # carrying the key-fetch and sources.list plumbing to install a second copy
+  # of the same packages under a different name.
+  local AKREX_CHECKED=false
+  require_akrex_repo() {
+    $AKREX_CHECKED && return 0
+    AKREX_CHECKED=true
+    pkg_available sdrpp-brown || pkg_available sdrpp || {
+      warn "Rex's ClockworkPi apt repo does not look configured: no sdrpp package resolves."
+      warn "This script targets Rex's image, which ships it. On another image, add it from"
+      warn "  https://github.com/ak-rex/akrex-arm-repo   then re-run."
+    }
+    return 0
   }
 
   want() {
@@ -610,6 +568,90 @@ bar {
 I3CONF
     log "wrote a managed i3 config (no bare Return bindings)"
 
+    # Alacritty config, pulled from this same repo. Its theme import points at
+    # cytracom_light.toml, which is in neither the upstream alacritty-theme
+    # repo nor any local checkout, so the import is commented out and the
+    # built-in default colours are used. Uncomment once the file exists.
+    local aldir="$USER_HOME/.config/alacritty"
+    run mkdir -p "$aldir"
+    if $DRY_RUN; then
+      log "[dry-run] fetch alacritty.toml into $aldir"
+    elif curl -fsSL --max-time 20 \
+           "https://raw.githubusercontent.com/${GH_KEY_USER}/utils/main/alacritty.toml" \
+           -o "$aldir/alacritty.toml"; then
+      sed -i 's|^\( *\)\("~/.*themes.*\.toml"\)|\1# \2  # uconsole-setup: no such file|' \
+        "$aldir/alacritty.toml"
+      log "installed alacritty.toml (theme import disabled, using defaults)"
+    else
+      warn "could not fetch alacritty.toml — using alacritty defaults"
+    fi
+
+    # Atkinson Hyperlegible Next and Mono. Debian's fonts-atkinson-hyperlegible
+    # is the original family only; Next and Mono are separate newer families
+    # and are not packaged, so take them from the upstream Google Fonts repos.
+    # alacritty.toml asks for "Atkinson Hyperlegible Mono", which is the family
+    # name shipped by the -next-mono repo.
+    local fontdir=/usr/local/share/fonts frepo dest tmpd
+    for frepo in atkinson-hyperlegible-next atkinson-hyperlegible-next-mono; do
+      dest="$fontdir/$frepo"
+      if [[ -d $dest ]]; then
+        log "fonts: $frepo already present"
+        continue
+      fi
+      if $DRY_RUN; then
+        log "[dry-run] install fonts from googlefonts/$frepo"
+        continue
+      fi
+      tmpd=$(mktemp -d)
+      if git clone --depth 1 "https://github.com/googlefonts/$frepo" "$tmpd" >/dev/null 2>&1 \
+         && compgen -G "$tmpd/fonts/otf/*.otf" >/dev/null; then
+        mkdir -p "$dest"
+        cp "$tmpd"/fonts/otf/*.otf "$dest"/
+        chmod 0644 "$dest"/*.otf
+        log "fonts: installed $frepo ($(ls "$dest" | wc -l | tr -d ' ') faces)"
+      else
+        warn "fonts: could not fetch googlefonts/$frepo"
+      fi
+      rm -rf "$tmpd"
+    done
+    # Point the generic families at Atkinson: Mono for monospace, Next for
+    # both proportional families. <prefer> puts these at the head of the
+    # substitution list without removing the existing fallbacks, so anything
+    # they lack a glyph for still resolves.
+    write_file /etc/fonts/local.conf 0644 <<'FONTCONF'
+<?xml version="1.0"?>
+<!DOCTYPE fontconfig SYSTEM "fonts.dtd">
+<!-- Managed by uconsole-setup.sh -->
+<fontconfig>
+  <alias>
+    <family>monospace</family>
+    <prefer><family>Atkinson Hyperlegible Mono</family></prefer>
+  </alias>
+  <alias>
+    <family>sans-serif</family>
+    <prefer><family>Atkinson Hyperlegible Next</family></prefer>
+  </alias>
+  <alias>
+    <family>serif</family>
+    <prefer><family>Atkinson Hyperlegible Next</family></prefer>
+  </alias>
+</fontconfig>
+FONTCONF
+
+    if ! $DRY_RUN; then
+      fc-cache -f >/dev/null 2>&1 || warn "fc-cache failed"
+      # Confirm the aliases actually resolve; a silent miss here means every
+      # generic-family lookup quietly falls back to DejaVu.
+      local generic resolved
+      for generic in monospace sans-serif serif; do
+        resolved=$(fc-match "$generic" 2>/dev/null | head -1)
+        case $resolved in
+          *Atkinson*) log "font: $generic -> $resolved" ;;
+          *) warn "font: $generic resolved to '$resolved', not Atkinson" ;;
+        esac
+      done
+    fi
+
     # i3status: Debian's default shows "ethernet" and "battery all", neither of
     # which reports anything here -- there is no wired NIC, and the uConsole
     # battery is not exposed as a standard power_supply device. Replaced with
@@ -760,95 +802,12 @@ AUTOLOGIN
     fi
   fi
 
-  # ------------------------------------------------------------------- games
-
-  if want games; then
-    section "Removing games and emulators"
-
-    local -a purge=() p
-    for p in "${GAME_PKGS[@]}"; do
-      pkg_installed "$p" && purge+=("$p")
-    done
-
-    # libretro cores are unambiguous; sweep whatever is installed.
-    local core
-    while read -r core; do
-      [[ -n $core ]] && purge+=("$core")
-    done < <(dpkg-query -W -f='${Package}\n' 'libretro-*' 2>/dev/null || true)
-
-    # Assert the deny list before doing anything destructive.
-    for p in "${purge[@]}"; do
-      [[ $p =~ $DENY_RE ]] && die "refusing to purge protected package '$p' — this is a bug, stopping"
-    done
-
-    if (( ${#purge[@]} )); then
-      log "purging ${#purge[@]} package(s): ${purge[*]}"
-      run apt-get purge -y "${purge[@]}"
-      run apt-get autoremove --purge -y
-    else
-      log "no game packages installed"
-    fi
-
-    # Anything else under those vendor prefixes is reported, never removed —
-    # it may well be hardware support rather than a game.
-    local -a leftovers=()
-    while read -r p; do
-      [[ -z $p ]] && continue
-      [[ $p =~ $DENY_RE ]] && continue
-      local skip=false q
-      for q in "${GAME_PKGS[@]}"; do [[ $q == "$p" ]] && skip=true; done
-      $skip || leftovers+=("$p")
-    done < <(dpkg-query -W -f='${Package}\n' 'devterm-*' 'uconsole-*' 2>/dev/null || true)
-    if (( ${#leftovers[@]} )); then
-      note "Vendor packages left untouched (review by hand if unwanted): ${leftovers[*]}"
-    fi
-
-    # Per-user leftovers. Sweep every human home, not just $DESKTOP_USER — if
-    # that account is new rather than a renamed 'cpi', the game data is in the
-    # old home and would otherwise survive.
-    local u uid home d
-    while IFS=: read -r u _ uid _ _ home _; do
-      (( uid >= 1000 && uid < 65534 )) || continue
-      [[ -d $home ]] || continue
-      for d in \
-        .config/retroarch .local/share/retroarch .cache/retroarch \
-        .config/openttd .local/share/openttd \
-        .config/dosbox .config/dosbox-staging .local/share/dosbox-staging \
-        .local/share/love .local/share/tic80 .config/tic80 \
-        .local/share/liko12 .local/share/lowresnx
-      do
-        [[ -d "$home/$d" ]] || continue
-        run rm -rf "${home:?}/${d}"
-        log "removed $home/$d"
-      done
-
-      # Launcher entries pointing at the binaries we just purged.
-      local dir entry
-      for dir in "$home/.local/share/applications" "$home/Desktop"; do
-        [[ -d $dir ]] || continue
-        while read -r entry; do
-          [[ -n $entry ]] || continue
-          run rm -f "$entry"
-          log "removed launcher $entry"
-        done < <(grep -rlEi '^Exec=.*(retroarch|tic80|cavestory|openttd|dosbox|liko12|lowresnx|love)' \
-                   "$dir" --include='*.desktop' 2>/dev/null || true)
-      done
-
-      # Reported, not deleted — these commonly hold things you put there.
-      for d in Games games ROMs roms; do
-        [[ -d "$home/$d" ]] && note "Left in place (may hold your own files): $home/$d"
-      done
-    done < /etc/passwd
-
-    run update-desktop-database /usr/share/applications 2>/dev/null || true
-  fi
-
   # --------------------------------------------------------------- AIO board
 
   local AIO_VIA_PACKAGE=false
   if want aio; then
     section "HackerGadgets AIO v2 board"
-    ensure_akrex_repo
+    require_akrex_repo
 
     if pkg_available hackergadgets-uconsole-aio-board; then
       log "vendor metapackage available — using it"
@@ -1025,7 +984,7 @@ GPSD
 
   if want lora; then
     section "LoRa / Meshtastic"
-    ensure_akrex_repo
+    require_akrex_repo
 
     apt_install libgpiod-dev libyaml-cpp-dev libbluetooth-dev libusb-1.0-0-dev \
                 libi2c-dev openssl libssl-dev
@@ -1095,7 +1054,7 @@ MESHYAML
 
   if want sdr; then
     section "SDR"
-    ensure_akrex_repo
+    require_akrex_repo
     apt_install rtl-sdr librtlsdr0
 
     # The DVB-T driver claims the dongle on plug-in and starves SDR software.

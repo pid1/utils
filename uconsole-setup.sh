@@ -90,7 +90,7 @@ main() {
   local BEGIN_MARK='# >>> uconsole-setup >>>'
   local END_MARK='# <<< uconsole-setup <<<'
 
-  local ALL_SECTIONS=(base games aio rtc gps lora sdr ham tailscale)
+  local ALL_SECTIONS=(base desktop games aio rtc gps lora sdr ham tailscale)
 
   # Game/emulator packages shipped in the stock uConsole image. This is an
   # explicit allowlist rather than a `uconsole-*` glob on purpose: the kernel,
@@ -167,21 +167,6 @@ main() {
     printf '%s\n' "$content" > "$tmp"
     chmod "$mode" "$tmp"
     mv -f "$tmp" "$path"
-  }
-
-  # stdin is the script when piped from curl, so anything interactive has to
-  # talk to the controlling terminal directly. sudo keeps it, so /dev/tty is
-  # still the user's terminal here.
-  have_tty() { { : < /dev/tty; } 2>/dev/null; }
-
-  prompt_yn() {
-    local q=$1 default=${2:-n} ans="" hint="[y/N]"
-    [[ $default == y ]] && hint="[Y/n]"
-    have_tty || return 1
-    printf '  %s %s ' "$q" "$hint" > /dev/tty
-    read -r ans < /dev/tty || return 1
-    [[ -z $ans ]] && ans=$default
-    [[ $ans == [Yy]* ]]
   }
 
   pkg_installed() {
@@ -301,39 +286,19 @@ main() {
   # Resolve the desktop account. Never create it — the password policy and
   # sudo membership are decisions this script should not be making silently.
   [[ -n $DESKTOP_USER ]] || DESKTOP_USER=$DEFAULT_USER
+  # Rex's Lite image runs a first-boot wizard that creates the user account, so
+  # by the time this runs it should already exist.
   if ! id -u "$DESKTOP_USER" >/dev/null 2>&1; then
-    if $DRY_RUN; then
-      log "user '$DESKTOP_USER' does not exist — a real run would offer to create it"
-      if [[ -n ${SUDO_USER:-} ]] && id -u "$SUDO_USER" >/dev/null 2>&1; then
-        DESKTOP_USER=$SUDO_USER
-        log "using '$DESKTOP_USER' for the rest of this dry run"
-      else
-        die "no account to inspect for a dry run; pass --user NAME"
-      fi
-    elif have_tty && prompt_yn "User '$DESKTOP_USER' does not exist. Create it now?" y; then
-      # adduser runs against the terminal so it can do its own password
-      # prompting: no echo, confirmation, and nothing passing through this
-      # script or its output. Never accept a password as an argument here.
-      if ! adduser "$DESKTOP_USER" < /dev/tty > /dev/tty 2>&1; then
-        die "adduser failed for '$DESKTOP_USER'"
-      fi
-      if getent group sudo >/dev/null 2>&1 \
-         && prompt_yn "Add '$DESKTOP_USER' to the sudo group?" y; then
-        adduser "$DESKTOP_USER" sudo > /dev/tty 2>&1
-        log "added $DESKTOP_USER to sudo"
-      fi
-      log "created $DESKTOP_USER"
-      note "Verify you can log in as $DESKTOP_USER and that sudo works, THEN remove the image's default account (it has a publicly known password): sudo deluser --remove-home <default>"
-    elif [[ -n ${SUDO_USER:-} ]] && id -u "$SUDO_USER" >/dev/null 2>&1; then
+    if [[ -n ${SUDO_USER:-} ]] && id -u "$SUDO_USER" >/dev/null 2>&1; then
       warn "user '$DESKTOP_USER' does not exist; falling back to '\$SUDO_USER' ($SUDO_USER)"
       DESKTOP_USER=$SUDO_USER
     else
-      die "user '$DESKTOP_USER' does not exist and there is no terminal to prompt on.
-  Create it first:
+      die "user '$DESKTOP_USER' does not exist. Create it first:
     adduser $DESKTOP_USER && adduser $DESKTOP_USER sudo
   then re-run, or pass --user NAME for a different account."
     fi
   fi
+
   local USER_HOME USER_GROUP
   USER_HOME=$(getent passwd "$DESKTOP_USER" | cut -d: -f6)
   USER_GROUP=$(id -gn "$DESKTOP_USER")
@@ -448,6 +413,191 @@ CRON
       log "added $DESKTOP_USER to: ${present[*]}"
       note "Group changes need a full logout/login (or reboot) before they apply."
     fi
+  fi
+
+  # ----------------------------------------------------------------- desktop
+
+  if want desktop; then
+    section "Desktop (i3 + X11)"
+
+    apt_install xserver-xorg xinit x11-xserver-utils \
+                i3 i3status dmenu alacritty brightnessctl \
+                fonts-dejavu-core fontconfig
+
+    # A Lite image has no audio userland at all, and both JS8Call and SDR++
+    # need one. clockworkpi-audio carries the device-specific config.
+    apt_install pipewire pipewire-pulse wireplumber || warn "audio stack install failed"
+    if pkg_available clockworkpi-audio; then
+      apt_install clockworkpi-audio || warn "clockworkpi-audio failed"
+    fi
+
+    # i3 runs an interactive config wizard when it starts with no config,
+    # which would block a headless first boot. Write one up front.
+    local i3dir="$USER_HOME/.config/i3"
+    if [[ -f /etc/i3/config ]]; then
+      run mkdir -p "$i3dir"
+      run cp -n /etc/i3/config "$i3dir/config"
+      # Mod1 is Alt, which collides with too much; Mod4 is the super key.
+      # Changing the definition line retroactively changes every later
+      # expansion, because i3 substitutes variables in parse order.
+      $DRY_RUN || sed -i 's/^set \$mod Mod1/set $mod Mod4/' "$i3dir/config"
+    else
+      warn "/etc/i3/config missing — writing a minimal config"
+      write_file "$i3dir/config" 0644 <<'I3MIN'
+set $mod Mod4
+font pango:Atkinson Hyperlegible Mono 12
+bindsym $mod+Return exec alacritty
+bindsym $mod+d exec dmenu_run
+bindsym $mod+Shift+q kill
+bindsym $mod+Shift+r restart
+I3MIN
+    fi
+
+    # Appended bindings win: i3 uses the last binding declared for a key.
+    if ! grep -q 'uconsole-setup' "$i3dir/config" 2>/dev/null; then
+      $DRY_RUN || cat >> "$i3dir/config" <<'I3EXTRA'
+
+# --- uconsole-setup ---------------------------------------------------------
+# 12pt is a starting point for the 5" 720p panel, which is ~290 DPI; raise it
+# here if title bars and the status bar read too small.
+font pango:Atkinson Hyperlegible Mono 12
+bindsym $mod+Return exec alacritty
+bindsym XF86MonBrightnessUp   exec brightnessctl set +10%
+bindsym XF86MonBrightnessDown exec brightnessctl set 10%-
+I3EXTRA
+      log "wrote $i3dir/config"
+    fi
+
+    # Alacritty config, pulled from this same repo. Its theme import points at
+    # cytracom_light.toml, which is in neither the upstream alacritty-theme
+    # repo nor any local checkout, so the import is commented out and the
+    # built-in default colours are used. Uncomment once the file exists.
+    local aldir="$USER_HOME/.config/alacritty"
+    run mkdir -p "$aldir"
+    if $DRY_RUN; then
+      log "[dry-run] fetch alacritty.toml into $aldir"
+    elif curl -fsSL --max-time 20 \
+           "https://raw.githubusercontent.com/${GH_KEY_USER}/utils/main/alacritty.toml" \
+           -o "$aldir/alacritty.toml"; then
+      sed -i 's|^\( *\)\("~/.*themes.*\.toml"\)|\1# \2  # uconsole-setup: no such file|' \
+        "$aldir/alacritty.toml"
+      log "installed alacritty.toml (theme import disabled, using defaults)"
+    else
+      warn "could not fetch alacritty.toml — using alacritty defaults"
+    fi
+
+    # Atkinson Hyperlegible Next and Mono. Debian's fonts-atkinson-hyperlegible
+    # is the original family only; Next and Mono are separate newer families
+    # and are not packaged, so take them from the upstream Google Fonts repos.
+    # alacritty.toml asks for "Atkinson Hyperlegible Mono", which is the family
+    # name shipped by the -next-mono repo.
+    local fontdir=/usr/local/share/fonts frepo dest tmpd
+    for frepo in atkinson-hyperlegible-next atkinson-hyperlegible-next-mono; do
+      dest="$fontdir/$frepo"
+      if [[ -d $dest ]]; then
+        log "fonts: $frepo already present"
+        continue
+      fi
+      if $DRY_RUN; then
+        log "[dry-run] install fonts from googlefonts/$frepo"
+        continue
+      fi
+      tmpd=$(mktemp -d)
+      if git clone --depth 1 "https://github.com/googlefonts/$frepo" "$tmpd" >/dev/null 2>&1 \
+         && compgen -G "$tmpd/fonts/otf/*.otf" >/dev/null; then
+        mkdir -p "$dest"
+        cp "$tmpd"/fonts/otf/*.otf "$dest"/
+        chmod 0644 "$dest"/*.otf
+        log "fonts: installed $frepo ($(ls "$dest" | wc -l | tr -d ' ') faces)"
+      else
+        warn "fonts: could not fetch googlefonts/$frepo"
+      fi
+      rm -rf "$tmpd"
+    done
+    # Point the generic families at Atkinson: Mono for monospace, Next for
+    # both proportional families. <prefer> puts these at the head of the
+    # substitution list without removing the existing fallbacks, so anything
+    # they lack a glyph for still resolves.
+    write_file /etc/fonts/local.conf 0644 <<'FONTCONF'
+<?xml version="1.0"?>
+<!DOCTYPE fontconfig SYSTEM "fonts.dtd">
+<!-- Managed by uconsole-setup.sh -->
+<fontconfig>
+  <alias>
+    <family>monospace</family>
+    <prefer><family>Atkinson Hyperlegible Mono</family></prefer>
+  </alias>
+  <alias>
+    <family>sans-serif</family>
+    <prefer><family>Atkinson Hyperlegible Next</family></prefer>
+  </alias>
+  <alias>
+    <family>serif</family>
+    <prefer><family>Atkinson Hyperlegible Next</family></prefer>
+  </alias>
+</fontconfig>
+FONTCONF
+
+    if ! $DRY_RUN; then
+      fc-cache -f >/dev/null 2>&1 || warn "fc-cache failed"
+      # Confirm the aliases actually resolve; a silent miss here means every
+      # generic-family lookup quietly falls back to DejaVu.
+      local generic resolved
+      for generic in monospace sans-serif serif; do
+        resolved=$(fc-match "$generic" 2>/dev/null | head -1)
+        case $resolved in
+          *Atkinson*) log "font: $generic -> $resolved" ;;
+          *) warn "font: $generic resolved to '$resolved', not Atkinson" ;;
+        esac
+      done
+    fi
+
+    # Start X on tty1 only. The panel is mounted rotated, so it comes up
+    # portrait and needs a transform; detect at runtime rather than assume,
+    # because some images already apply it at the DRM level and rotating a
+    # second time leaves the display sideways.
+    write_file "$USER_HOME/.xinitrc" 0755 <<'XINITRC'
+#!/bin/sh
+# Managed by uconsole-setup.sh
+line=$(xrandr | grep -m1 ' connected')
+out=${line%% *}
+geom=$(printf '%s\n' "$line" | grep -oE '[0-9]+x[0-9]+\+[0-9]+\+[0-9]+' | head -1)
+w=${geom%%x*}
+h=${geom#*x}; h=${h%%+*}
+case "$w" in ''|*[!0-9]*) w=0 ;; esac
+case "$h" in ''|*[!0-9]*) h=0 ;; esac
+if [ -n "$out" ] && [ "$h" -gt "$w" ]; then
+    xrandr --output "$out" --rotate right
+fi
+exec i3
+XINITRC
+
+    # Sourcing .profile keeps this from shadowing the shell's normal setup,
+    # which bash would otherwise skip once .bash_profile exists.
+    write_file "$USER_HOME/.bash_profile" 0644 <<'BASHPROF'
+# Managed by uconsole-setup.sh
+[ -f "$HOME/.profile" ] && . "$HOME/.profile"
+
+if [ -z "${DISPLAY:-}" ] && [ "$(tty)" = "/dev/tty1" ]; then
+    exec startx
+fi
+BASHPROF
+
+    write_file /etc/systemd/system/getty@tty1.service.d/autologin.conf 0644 <<AUTOLOGIN
+[Service]
+ExecStart=
+ExecStart=-/sbin/agetty --autologin ${DESKTOP_USER} --noclear %I \$TERM
+AUTOLOGIN
+    run systemctl daemon-reload
+
+    run chown -R "${DESKTOP_USER}:${USER_GROUP}" \
+      "$USER_HOME/.config" "$USER_HOME/.xinitrc" "$USER_HOME/.bash_profile"
+
+    log "i3 + X11 configured, autologin on tty1 as $DESKTOP_USER"
+    note "Desktop: tty1 autologins as $DESKTOP_USER and starts i3. Mod key is Super; Mod+Return is a terminal, Mod+d is dmenu."
+    note "Fonts: monospace -> Atkinson Hyperlegible Mono, serif/sans-serif -> Atkinson Hyperlegible Next, via /etc/fonts/local.conf. i3 uses Mono at 12pt (~/.config/i3/config); raise it if it reads small on the 5\" panel."
+    note "Desktop: screen rotation is detected at X startup, so it is a no-op if the image already rotates the panel. If it lands sideways, edit ~/.xinitrc."
+    note "Wi-Fi on a Lite image: 'sudo raspi-config' (System Options -> Wireless LAN), or nmtui if NetworkManager is in use."
   fi
 
   # ------------------------------------------------------------------- games

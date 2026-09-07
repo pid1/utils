@@ -82,7 +82,7 @@ Every section is skippable with `--skip NAME`, or run alone with `--only NAME`.
 | `aio` | HackerGadgets AIO v2 metapackage, GPIO power rails, boot overlays |
 | `rtc` | PCF85063A over i2c, `fake-hwclock` disabled |
 | `gps` | UART + PPS overlays, serial console removed, `gpsd` on `/dev/ttyS0` |
-| `lora` | SPI overlays, `meshtasticd` with the SX1262 config |
+| `lora` | SPI overlays, `meshtasticd` with the SX1262 config, `meshtastic-ui` dashboard, region |
 | `sdr` | `sdrpp-brown`, `rtl-sdr`, DVB-T driver blacklisted, gqrx bookmarks migrated |
 | `ham` | JS8Call + hamlib, GhostNet configuration |
 | `tailscale` | Tailscale from its official repo |
@@ -205,16 +205,19 @@ which had no such gating.
 |---|---|---|
 | `SDR` | 7 | **on** |
 | `USB` (internal hub) | 23 | **on** |
-| `GPS` | 27 | off |
-| `LORA` | 16 | off |
+| `GPS` | 27 | **on** |
+| `LORA` | 16 | **on** |
 
 **SDR and USB come up together on purpose.** The RTL-SDR is an internal USB
 device behind the AIO's hub, so powering the SDR rail alone will not make it
 enumerate — `rtl_test` would report no supported devices found.
 
-GPS and LoRa stay off: they draw continuously for hardware most sessions don't
-use. Everything else for them *is* configured — overlays, `gpsd`,
-`meshtasticd` — so they need only power.
+All four are up: GPS because chrony disciplines the clock from it, LoRa
+because `meshtasticd` runs at boot.
+
+`aiov2_ctl` tracks the current state and the boot state separately —
+`aiov2_ctl SDR on` powers a rail now, while `aiov2-rails-boot.service` replays
+only what `--boot-rail` recorded. The setup sets both.
 
 ### Turning one on for this session
 
@@ -300,6 +303,49 @@ rtl_test -t                   # SDR enumerated
 pinctrl get 7                 # rail state directly
 cgps -s                       # GPS, once its rail is on
 ```
+
+## Meshtastic
+
+`meshtasticd` drives the SX1262 over `/dev/spidev1.0`, created by the
+`spi1-1cs` overlay. `meshtastic-ui` is the dashboard, on workspace 3.
+
+```bash
+meshtastic --host localhost --info      # node, region, modem preset
+meshtastic --host localhost --nodes     # what the mesh can see
+systemctl status meshtasticd
+```
+
+Region is set to `US` (`LORA_REGION` in `setup.sh`). **Nothing transmits until
+a region is set**, and the wrong one is a regulatory problem rather than a
+config annoyance.
+
+The Meshtastic config deliberately has **no `GPS:` block**: `gpsd` owns
+`/dev/ttyS0` to feed chrony, and a second reader would fight it for the
+receiver.
+
+The CLI lives in a venv at `/opt/meshtastic-cli`, symlinked to
+`/usr/local/bin/meshtastic` — there is no Debian package, and bookworm marks
+the system interpreter externally-managed.
+
+## Applications at login
+
+i3 launches three apps and places them:
+
+| Workspace | Application |
+|---|---|
+| 1 | SDR++Brown |
+| 2 | JS8Call |
+| 3 | `meshtastic-ui` |
+
+Two quirks the rules work around. SDR++Brown puts its version and build date
+*inside* `WM_CLASS`, so the rule matches a `^sdr` prefix rather than the whole
+string, which would break on every upgrade. `meshtastic-ui` sets **no
+`WM_CLASS` at all**, so `assign` has nothing to match and a
+`for_window [title="^Meshtastic"]` rule moves it instead.
+
+These use `exec`, which runs only at i3 startup — `i3-msg restart` will not
+relaunch them, by design, since `exec_always` would spawn duplicates on every
+reload.
 
 ## Display and power
 

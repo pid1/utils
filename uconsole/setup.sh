@@ -679,6 +679,21 @@ mode "resize" {
 }
 bindsym $mod+r mode "resize"
 
+# --- application workspaces -------------------------------------------------
+# SDR++Brown puts its version and build date inside WM_CLASS
+# ("SDR++Brown v1.2.1-brown (Built at ...)"), so match a prefix; the full
+# string changes on every upgrade.
+assign [class="(?i)^sdr"] workspace number 1
+assign [class="(?i)^js8call$"] workspace number 2
+
+# meshtastic-ui sets no WM_CLASS at all, so assign has no criteria to match
+# on. for_window fires once the window is mapped and titled instead.
+for_window [title="^Meshtastic"] move to workspace number 3
+
+exec --no-startup-id sdrpp
+exec --no-startup-id js8call
+exec --no-startup-id meshtastic-ui
+
 bar {
         status_command i3status
         position top

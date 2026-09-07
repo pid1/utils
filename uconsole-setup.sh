@@ -710,6 +710,48 @@ I3STATUS
     # portrait and needs a transform; detect at runtime rather than assume,
     # because some images already apply it at the DRM level and rotating a
     # second time leaves the display sideways.
+    # Screen blanking and power management are disabled at every layer, not
+    # just in X. This device is almost always on battery and the screen is
+    # wanted on regardless; the DSI panel also wakes from DPMS to a grey
+    # screen, so blanking is actively harmful here rather than merely unwanted.
+    #
+    # 1. Xorg itself, from server start. This is the durable one: it applies
+    #    before any session script runs and survives anything that resets xset.
+    write_file /etc/X11/xorg.conf.d/10-no-blanking.conf 0644 <<'XORGBLANK'
+# Managed by uconsole-setup.sh
+Section "ServerFlags"
+    Option "BlankTime"   "0"
+    Option "StandbyTime" "0"
+    Option "SuspendTime" "0"
+    Option "OffTime"     "0"
+EndSection
+
+Section "Extensions"
+    Option "DPMS" "Disable"
+EndSection
+XORGBLANK
+
+    # 2. logind, so no idle action fires at the seat level.
+    write_file /etc/systemd/logind.conf.d/10-no-idle.conf 0644 <<'LOGIND'
+# Managed by uconsole-setup.sh
+[Login]
+IdleAction=ignore
+IdleActionSec=0
+LOGIND
+
+    # 3. The kernel framebuffer console, which blanks independently of X and
+    #    is what you land on if X ever exits. consoleblank is a boot parameter,
+    #    so this needs the reboot the overlays already require.
+    if [[ -f $BOOT_DIR/cmdline.txt ]]; then
+      if grep -q 'consoleblank=' "$BOOT_DIR/cmdline.txt"; then
+        $DRY_RUN || sed -i 's/consoleblank=[0-9]*/consoleblank=0/' "$BOOT_DIR/cmdline.txt"
+      else
+        # cmdline.txt must stay exactly one line.
+        $DRY_RUN || sed -i '1s/$/ consoleblank=0/' "$BOOT_DIR/cmdline.txt"
+      fi
+      log "console blanking disabled (consoleblank=0)"
+    fi
+
     write_file "$USER_HOME/.xinitrc" 0755 <<'XINITRC'
 #!/bin/sh
 # Managed by uconsole-setup.sh
@@ -724,11 +766,11 @@ if [ -n "$out" ] && [ "$h" -gt "$w" ]; then
     xrandr --output "$out" --rotate right
 fi
 
-# The DSI panel does not reliably repaint when it comes back from DPMS -- it
-# wakes to a solid grey screen and stays there until the VT is switched away
-# and back. Rather than fight it, stop X blanking the panel at all. Backlight
-# off on demand is bound in the i3 config instead (Mod+Shift+b), which drives
-# brightnessctl and does not involve DPMS.
+# Belt and braces. Xorg is already configured not to blank (see
+# /etc/X11/xorg.conf.d/10-no-blanking.conf), but anything in a session can
+# turn it back on at runtime, so assert it here too. The panel wakes from
+# DPMS to a solid grey screen that needs a VT switch to clear, and this
+# device is almost always on battery with the screen wanted on regardless.
 xset s off
 xset s noblank
 xset -dpms
@@ -765,7 +807,7 @@ AUTOLOGIN
     note "Desktop: tty1 autologins as $DESKTOP_USER and starts i3. Mod key is Super; Mod+Return is a terminal, Mod+d is dmenu."
     note "i3status now shows labelled CPU, RAM, temperature, disk and wifi; ethernet and battery are gone. Config: ~/.config/i3status/config (Mod+Shift+r reloads i3)."
     note "Fonts: monospace -> Atkinson Hyperlegible Mono, serif/sans-serif -> Atkinson Hyperlegible Next, via /etc/fonts/local.conf. i3 uses Mono at 12pt (~/.config/i3/config); raise it if it reads small on the 5\" panel."
-    note "Display: X blanking and DPMS are disabled, because the DSI panel wakes to a grey screen and needs a VT switch to repaint. Mod+Shift+b turns the backlight off deliberately, Mod+Shift+n restores it."
+    note "Display: blanking and power management are off at every layer — Xorg (10-no-blanking.conf), logind (IdleAction=ignore), the kernel console (consoleblank=0, needs the reboot) and xset in .xinitrc. Nothing locks or blanks the screen. Mod+Shift+b kills the backlight deliberately, Mod+Shift+n restores it."
     note "Desktop: screen rotation is detected at X startup, so it is a no-op if the image already rotates the panel. If it lands sideways, edit ~/.xinitrc."
     note "Wi-Fi on a Lite image: 'sudo raspi-config' (System Options -> Wireless LAN), or nmtui if NetworkManager is in use."
   fi

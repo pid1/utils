@@ -39,6 +39,9 @@ main() {
   local GH_KEY_USER=pid1
   local DEFAULT_USER=jroemer
   local TIMEZONE=America/Chicago   # US/Central; America/Chicago is the canonical name
+  # Meshtastic will not transmit until a region is set. Wrong region is a
+  # regulatory problem, so this is explicit rather than guessed.
+  local LORA_REGION=US
   local AIOV2_REPO=https://github.com/hackergadgets/aiov2_ctl.git
   local AIOV2_DIR=/opt/aiov2_ctl
   local MESHTASTIC_REPO=http://download.opensuse.org/repositories/network:/Meshtastic:/beta/Raspbian_12/
@@ -59,8 +62,8 @@ main() {
   # Rails brought up at boot. SDR needs USB as well: the RTL-SDR is an
   # internal USB device behind the AIO hub, so powering the SDR rail alone
   # will not make it enumerate. GPS is up because chrony disciplines the clock
-  # from it. LoRa stays off; add LORA here to make it persistent.
-  local BOOT_RAILS=(SDR USB GPS)
+  # from it, and LoRa because meshtasticd runs at boot.
+  local BOOT_RAILS=(SDR USB GPS LORA)
 
   local BEGIN_MARK='# >>> uconsole-setup >>>'
   local END_MARK='# <<< uconsole-setup <<<'
@@ -760,7 +763,7 @@ FONTCONF
       # generic-family lookup quietly falls back to DejaVu.
       local generic resolved
       for generic in monospace sans-serif serif; do
-        resolved=$(fc-match "$generic" 2>/dev/null | head -1)
+        resolved=$(fc-match "$generic" 2>/dev/null | head -1) || resolved=""
         case $resolved in
           *Atkinson*) log "font: $generic -> $resolved" ;;
           *) warn "font: $generic resolved to '$resolved', not Atkinson" ;;
@@ -1131,32 +1134,50 @@ UNIT
 
   # ----------------------------------------------------- boot config (CM4)
 
-  # Build the config.txt stanza from whichever sections are enabled. Skipped
-  # entirely when the vendor metapackage is managing boot config, to avoid
-  # duplicate overlay lines fighting each other.
-  if ! $AIO_VIA_PACKAGE && { want rtc || want gps || want lora; }; then
+  # --------------------------------------------------------- boot config
+
+  # The overlays this hardware needs, independent of which sections are
+  # running. Building the list from the active sections means `--only gps`
+  # rewrites the block with just the GPS lines and silently drops the RTC and
+  # SPI overlays the other subsystems depend on.
+  #
+  # Lines already set elsewhere in config.txt are skipped rather than
+  # repeated: the AIO metapackage writes some of these itself, and a second
+  # dtoverlay for the same device would try to instantiate it twice.
+  if [[ -f $BOOT_DIR/config.txt ]]; then
     section "Boot configuration ($BOOT_DIR/config.txt)"
 
-    # Leading [all] resets any conditional filter the file ended inside —
-    # without it, appending after a trailing [cm4]/[pi4] section would scope
-    # these overlays to that filter instead of applying unconditionally.
+    local -a want_overlays=(
+      "dtparam=i2c_arm=on"                 # RTC bus
+      "dtoverlay=i2c-rtc,pcf85063a"        # RTC
+      "enable_uart=1"                      # GPS on the PL011
+      "dtoverlay=pps-gpio,gpiopin=6"       # GPS PPS for chrony
+      "dtparam=spi=on"
+      "dtoverlay=spi1-1cs"                 # LoRa: creates /dev/spidev1.0
+    )
+
     local -a stanza=("[all]" "# HackerGadgets AIO v2 on uConsole CM4")
+    local ov existing
+    existing=$(sed "\|^${BEGIN_MARK}\$|,\|^${END_MARK}\$|d" "$BOOT_DIR/config.txt" \
+               | grep -vE '^[[:space:]]*#')
+    for ov in "${want_overlays[@]}"; do
+      if printf '%s\n' "$existing" | grep -qxF "$ov"; then
+        log "already set elsewhere: $ov"
+      else
+        stanza+=("$ov")
+        log "adding: $ov"
+      fi
+    done
 
-    if want rtc; then
-      stanza+=("dtparam=i2c_arm=on" "dtoverlay=i2c-rtc,pcf85063a")
-      log "rtc: pcf85063a over i2c"
+    if (( ${#stanza[@]} > 2 )); then
+      printf '%s\n' "${stanza[@]}" | apply_block "$BOOT_DIR/config.txt"
+      note "Boot overlays changed — a reboot is required before RTC/GPS/LoRa work."
+    else
+      # Still rewrite, so a block left over from an earlier narrower run is
+      # replaced by the full set rather than kept.
+      printf '%s\n' "${stanza[@]}" | apply_block "$BOOT_DIR/config.txt"
+      log "all required overlays already present"
     fi
-    if want gps; then
-      stanza+=("enable_uart=1" "dtoverlay=pps-gpio,gpiopin=6")
-      log "gps: uart enabled, pps on gpio 6"
-    fi
-    if want lora; then
-      stanza+=("dtparam=spi=on" "dtoverlay=spi1-1cs")
-      log "lora: spi1 with one chip select"
-    fi
-
-    printf '%s\n' "${stanza[@]}" | apply_block "$BOOT_DIR/config.txt"
-    note "Boot overlays changed — a reboot is required before RTC/GPS/LoRa work."
   fi
 
   # --------------------------------------------------------------------- rtc
@@ -1306,8 +1327,8 @@ Lora:
   Reset: 25
   spidev: spidev1.0
 
-GPS:
-  SerialPath: /dev/ttyS0
+# No GPS block on purpose. gpsd owns /dev/ttyS0 to feed chrony, and a second
+# reader on that port would fight it for the receiver.
 MESHYAML
       log "wrote /etc/meshtasticd/config.d/uconsole-aio-v2.yaml"
     else
@@ -1315,15 +1336,71 @@ MESHYAML
       note "Add the SX1262 block (Module sx1262, IRQ 26, Busy 24, Reset 25, spidev1.0) to /etc/meshtasticd/config.yaml by hand."
     fi
 
-    if [[ -f /lib/systemd/system/meshtasticd.service || -f /etc/systemd/system/meshtasticd.service ]] || $DRY_RUN; then
+    # meshtastic-mui provides /usr/bin/meshtastic-ui, the dashboard.
+    if pkg_available meshtastic-mui; then
+      apt_install_opt meshtastic-mui
+    else
+      warn "meshtastic-mui not available in any configured repo"
+    fi
+
+    # aiov2_ctl owns whether meshtasticd starts at boot; going through
+    # systemctl as well would give two things an opinion about it.
+    if command -v aiov2_ctl >/dev/null 2>&1; then
+      run aiov2_ctl --mesh-on-boot on || warn "could not set meshtasticd to start at boot"
+    elif [[ -f /lib/systemd/system/meshtasticd.service ]] || $DRY_RUN; then
       run systemctl daemon-reload
       run systemctl enable meshtasticd || warn "could not enable meshtasticd"
     fi
 
+    # The radio needs /dev/spidev1.0 from the spi1-1cs overlay. Say so plainly
+    # rather than leaving a daemon that starts and finds nothing.
+    if ! $DRY_RUN && [[ ! -e /dev/spidev1.0 ]]; then
+      warn "/dev/spidev1.0 does not exist — the LoRa radio cannot be reached until the spi1-1cs overlay is active (reboot)."
+      note "LoRa: /dev/spidev1.0 was missing at setup time. Reboot, then confirm it exists and 'systemctl status meshtasticd' is running."
+    fi
+
+    # The region lives in the node's own config, not in a file, so it is set
+    # through the client against a running daemon. The CLI is a Python package
+    # with no Debian equivalent; a venv keeps it off the system interpreter,
+    # which bookworm marks externally-managed.
+    local mtcli=/opt/meshtastic-cli
+    if ! $DRY_RUN; then
+      if [[ ! -x $mtcli/bin/meshtastic ]]; then
+        apt_install_opt python3-venv
+        if python3 -m venv "$mtcli" 2>/dev/null \
+           && "$mtcli/bin/pip" install --quiet --upgrade pip meshtastic 2>/dev/null; then
+          ln -sf "$mtcli/bin/meshtastic" /usr/local/bin/meshtastic
+          log "installed the meshtastic CLI into $mtcli"
+        else
+          warn "could not install the meshtastic CLI; set the region by hand"
+        fi
+      fi
+
+      if [[ -x $mtcli/bin/meshtastic ]] && systemctl is-active --quiet meshtasticd; then
+        local cur
+        # `|| cur=""` is load-bearing: under pipefail a grep that matches
+        # nothing makes the assignment itself non-zero, and set -e would end
+        # the run here.
+        cur=$(timeout 30 "$mtcli/bin/meshtastic" --host localhost --get lora.region 2>/dev/null \
+              | grep -oE '[A-Z_]+$' | head -1) || cur=""
+        if [[ $cur == "$LORA_REGION" ]]; then
+          log "LoRa region already $LORA_REGION"
+        else
+          if timeout 60 "$mtcli/bin/meshtastic" --host localhost \
+               --set lora.region "$LORA_REGION" >/dev/null 2>&1; then
+            log "LoRa region set to $LORA_REGION"
+          else
+            warn "could not set the LoRa region; run: meshtastic --host localhost --set lora.region $LORA_REGION"
+          fi
+        fi
+      else
+        note "LoRa region is not set yet. Once meshtasticd is running: meshtastic --host localhost --set lora.region ${LORA_REGION}  — nothing transmits until it is."
+      fi
+    fi
+
     # Deliberately not set: transmitting on the wrong region is a regulatory
     # problem, not a config annoyance.
-    note "LoRa: the radio's power rail is OFF by default — turn it on with 'sudo aiov2_ctl LORA on' (see the README to make it persistent)."
-    note "Meshtastic will not transmit until you set a LoRa region, e.g.: meshtastic --set lora.region US"
+    note "Meshtastic dashboard is 'meshtastic-ui' (workspace 3). Node state: meshtastic --host localhost --info"
   fi
 
   # --------------------------------------------------------------------- sdr

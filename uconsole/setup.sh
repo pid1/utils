@@ -326,8 +326,35 @@ main() {
     # `systemctl disable ssh` behind a build-time condition, so whether the
     # image arrives with a listener is not something to assume either way.
     apt_install openssh-server
-    run systemctl enable --now ssh
-    log "sshd enabled and listening on 22"
+
+    # A masked unit cannot be enabled, and `systemctl enable` on one fails --
+    # which under set -e would take the whole base section down. Some images
+    # ship ssh masked rather than merely disabled.
+    run systemctl unmask ssh.service 2>/dev/null || true
+    run systemctl unmask ssh.socket  2>/dev/null || true
+
+    # Bookworm uses ssh.service; socket activation (ssh.socket) exists but is
+    # not the default. If the socket is enabled, the service is held inactive
+    # and starting it directly conflicts -- so defer to whichever is in play.
+    if systemctl is-enabled ssh.socket >/dev/null 2>&1; then
+      run systemctl restart ssh.socket || warn "ssh.socket would not start"
+      log "sshd via socket activation (ssh.socket)"
+    else
+      run systemctl enable ssh || warn "could not enable ssh"
+      run systemctl restart ssh || warn "could not start ssh"
+      log "sshd enabled (ssh.service)"
+    fi
+
+    # Say plainly whether anything is actually listening, rather than leaving
+    # a 'connection refused' to be discovered from another machine.
+    if ! $DRY_RUN; then
+      if ss -tln 2>/dev/null | grep -qE ':22[[:space:]]'; then
+        log "sshd listening on 22"
+      else
+        warn "nothing is listening on port 22 — check: systemctl status ssh; journalctl -u ssh -n 30"
+        note "SSH is not listening. 'systemctl status ssh' and 'journalctl -u ssh -n 30' will say why; a missing host key or a masked unit are the usual causes."
+      fi
+    fi
 
     apt_install curl ca-certificates gnupg git
 

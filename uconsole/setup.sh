@@ -1,77 +1,29 @@
 #!/usr/bin/env bash
 #
-# uconsole-setup.sh — first-time provisioning for a ClockworkPi uConsole (CM4)
-# running Debian Bookworm with the HackerGadgets AIO v2 extension board.
+# Provisioning for a ClockworkPi uConsole (CM4) on Rex's Debian Bookworm image
+# with the HackerGadgets AIO v2 board. See README.md in this directory for
+# what it installs, key bindings, and post-install steps.
 #
-# Intended invocation:
+#   curl -fsSL https://raw.githubusercontent.com/pid1/utils/main/uconsole/setup.sh | sudo bash
 #
-#   curl -fsSL https://raw.githubusercontent.com/pid1/utils/main/uconsole-setup.sh | sudo bash
+# Flags must go through `bash -s --`; `| sudo bash --dry-run` hands the flag to
+# bash instead of to this script:
 #
-# Everything lives inside main() so a truncated download — the pipe dropping
-# mid-transfer — dies on an incomplete function definition rather than
-# executing half a script that rewrites config.txt and purges packages.
+#   ... | sudo bash -s -- --dry-run
+#   ... | sudo bash -s -- --only sdr --skip lora
+#   ... | sudo TS_AUTHKEY=tskey-auth-... bash -s -- --only tailscale
 #
-# stdin is the script itself, so nothing here may read from it. All apt calls
-# are non-interactive; the escape hatch for a real prompt is `< /dev/tty`.
+# Two constraints shape this file:
 #
-# Re-running is safe and is the intended way to use this as config management:
-# every step is idempotent. Files it owns are rewritten from source rather than
-# appended to, config.txt edits are confined to a marker block that is replaced
-# wholesale, package purges only touch what is installed, and backups are taken
-# once rather than per run so repeat runs cannot fill the boot partition or
-# $HOME with timestamped copies. A run that changes nothing writes nothing.
+#   The body is wrapped in main() so a truncated download -- the pipe dropping
+#   mid-transfer -- dies on an incomplete function definition instead of
+#   executing half a script that rewrites config.txt.
 #
-# Flags have to go through `bash -s --`, since `| sudo bash --dry-run` would
-# hand the flag to bash instead of to us:
+#   stdin is the script itself, so nothing here may read from it. apt is fully
+#   non-interactive; the escape hatch for a real prompt is `< /dev/tty`.
 #
-#   curl -fsSL <url> | sudo bash -s -- --dry-run
-#   curl -fsSL <url> | sudo bash -s -- --skip lora --skip tailscale
-#   curl -fsSL <url> | sudo bash -s -- --only sdr --user someone
-#
-# sudo scrubs the environment, so TS_AUTHKEY must be set *after* sudo:
-#
-#   curl -fsSL <url> | sudo TS_AUTHKEY=tskey-auth-... bash -s -- --only tailscale
-
-# ---------------------------------------------------------------------------
-# Getting an OS onto the uConsole first
-#
-#   1. Download Rex's Bookworm image, ClockworkPi-Bookworm-6.12.y.img.xz. Rex
-#      publishes no images on GitHub -- his GitHub holds only source (pi-gen,
-#      the kernel tree, the apt repo) -- so the images live on:
-#        https://mega.nz/folder/LSInGD6J#0YezWX8xC4PkbyForgl1Hw
-#        https://drive.google.com/drive/folders/1tw2uPVPsFDhQ5Onx4mlllYexUDmDp0eK
-#        https://app.drime.cloud/drive/s/O3faUnk9ihg2vlrgek0LiaHRiU3fGb
-#      all linked from the forum thread, which is also where the current
-#      release and any per-version caveats are announced:
-#        https://forum.clockworkpi.com/t/bookworm-6-12-y-for-the-uconsole-and-devterm/15847
-#
-#   2. Write it with Raspberry Pi Imager: Choose OS -> Use custom -> pick the
-#      .xz (it decompresses on the fly). Balena Etcher works too. Imager's
-#      advanced options can preset the Wi-Fi SSID/password -- worth doing,
-#      since the uConsole keyboard is a slow way to type a passphrase.
-#
-#   3. Target is a microSD card. A CM4 *with* eMMC has no SD lines wired up and
-#      must be flashed over USB with rpiboot/usbboot instead; CM4 Lite uses SD.
-#
-#   4. First boot expands the filesystem and reboots by itself, then runs a
-#      wizard that creates your user account -- so by the time this script
-#      runs, that account exists and it does not create users itself.
-#
-#      If the image instead drops you at a default account, the forum thread
-#      is the authoritative source for its credentials; published sources
-#      disagree (pi/clockworkpi vs clockwork/clockwork), so do not count on
-#      either. Create your own account, confirm you can log in and that sudo
-#      works, and only then remove the default one:
-#        sudo adduser jroemer && sudo adduser jroemer sudo
-#        sudo deluser --remove-home <default-user>
-#
-#   This script targets Rex's image specifically. It assumes his apt repo is
-#   already configured -- that is where sdrpp-brown, the HackerGadgets AIO
-#   metapackage, pinctrl and the rtlsdrblog rtl-sdr build come from rather
-#   than Debian -- and verifies it rather than adding a copy. It also assumes
-#   the image ships no games or desktop, which is true of both the Lite and
-#   full builds, so there is nothing to strip out.
-# ---------------------------------------------------------------------------
+# Every step is idempotent: re-running is the intended way to use this as
+# config management. A run that changes nothing writes nothing.
 
 main() {
   set -euo pipefail
@@ -123,7 +75,7 @@ main() {
       --skip)         SKIP+=("${2:?--skip needs a section}"); shift ;;
       --skip=*)       SKIP+=("${1#*=}") ;;
       -h|--help)
-        printf 'usage: uconsole-setup.sh [--dry-run] [--user NAME] [--only SECTION]... [--skip SECTION]...\n'
+        printf 'usage: setup.sh [--dry-run] [--user NAME] [--only SECTION]... [--skip SECTION]...\n'
         printf 'sections: %s\n' "${ALL_SECTIONS[*]}"
         return 0 ;;
       *) printf 'unknown argument: %s\n' "$1" >&2; return 2 ;;
@@ -367,7 +319,7 @@ main() {
     # parses as SSH public keys, and only then swaps it in atomically.
     write_file /usr/local/sbin/sync-github-keys 0755 <<'SYNCKEYS'
 #!/bin/sh
-# Managed by uconsole-setup.sh — refresh authorized_keys from GitHub.
+# Managed by uconsole/setup.sh — refresh authorized_keys from GitHub.
 set -eu
 
 GH_USER="__GH_USER__"
@@ -419,7 +371,7 @@ SYNCKEYS
     fi
 
     write_file /etc/cron.d/keys 0644 <<'CRON'
-# Managed by uconsole-setup.sh
+# Managed by uconsole/setup.sh
 SHELL=/bin/sh
 PATH=/usr/local/sbin:/usr/local/bin:/sbin:/bin:/usr/sbin:/usr/bin
 */5 * * * *   root   /usr/local/sbin/sync-github-keys
@@ -471,7 +423,7 @@ CRON
     #
     # This file is managed: local edits are overwritten on the next run.
     write_file "$USER_HOME/.config/i3/config" 0644 <<'I3CONF'
-# Managed by uconsole-setup.sh -- edits here are overwritten on the next run.
+# Managed by uconsole/setup.sh -- edits here are overwritten on the next run.
 
 # $mod is Alt (Mod1). The uConsole's CMD key is reachable only as Fn+CMD --
 # a two-key chord for every window operation -- so Alt wins on ergonomics
@@ -643,7 +595,7 @@ I3CONF
     write_file /etc/fonts/local.conf 0644 <<'FONTCONF'
 <?xml version="1.0"?>
 <!DOCTYPE fontconfig SYSTEM "fonts.dtd">
-<!-- Managed by uconsole-setup.sh -->
+<!-- Managed by uconsole/setup.sh -->
 <fontconfig>
   <alias>
     <family>monospace</family>
@@ -679,7 +631,7 @@ FONTCONF
     # battery is not exposed as a standard power_supply device. Replaced with
     # labelled CPU, RAM and temperature so the numbers are identifiable.
     write_file "$USER_HOME/.config/i3status/config" 0644 <<'I3STATUS'
-# Managed by uconsole-setup.sh
+# Managed by uconsole/setup.sh
 general {
         colors = true
         interval = 5
@@ -734,7 +686,7 @@ I3STATUS
     # 1. Xorg itself, from server start. This is the durable one: it applies
     #    before any session script runs and survives anything that resets xset.
     write_file /etc/X11/xorg.conf.d/10-no-blanking.conf 0644 <<'XORGBLANK'
-# Managed by uconsole-setup.sh
+# Managed by uconsole/setup.sh
 Section "ServerFlags"
     Option "BlankTime"   "0"
     Option "StandbyTime" "0"
@@ -749,7 +701,7 @@ XORGBLANK
 
     # 2. logind, so no idle action fires at the seat level.
     write_file /etc/systemd/logind.conf.d/10-no-idle.conf 0644 <<'LOGIND'
-# Managed by uconsole-setup.sh
+# Managed by uconsole/setup.sh
 [Login]
 IdleAction=ignore
 IdleActionSec=0
@@ -770,7 +722,7 @@ LOGIND
 
     write_file "$USER_HOME/.xinitrc" 0755 <<'XINITRC'
 #!/bin/sh
-# Managed by uconsole-setup.sh
+# Managed by uconsole/setup.sh
 line=$(xrandr | grep -m1 ' connected')
 out=${line%% *}
 geom=$(printf '%s\n' "$line" | grep -oE '[0-9]+x[0-9]+\+[0-9]+\+[0-9]+' | head -1)
@@ -797,7 +749,7 @@ XINITRC
     # Sourcing .profile keeps this from shadowing the shell's normal setup,
     # which bash would otherwise skip once .bash_profile exists.
     write_file "$USER_HOME/.bash_profile" 0644 <<'BASHPROF'
-# Managed by uconsole-setup.sh
+# Managed by uconsole/setup.sh
 [ -f "$HOME/.profile" ] && . "$HOME/.profile"
 
 # Deliberately not `exec startx`: with exec, a failing X replaces the login
@@ -935,7 +887,7 @@ AUTOLOGIN
       apt_install pinctrl || apt_install raspi-utils || true
       write_file /usr/local/sbin/uconsole-aio-rails 0755 <<'RAILS'
 #!/bin/sh
-# Managed by uconsole-setup.sh — AIO v2 power rails (GPS/LoRa/SDR/USB hub).
+# Managed by uconsole/setup.sh — AIO v2 power rails (GPS/LoRa/SDR/USB hub).
 set -eu
 STATE=${1:-on}
 case "$STATE" in
@@ -1042,7 +994,7 @@ UNIT
     run systemctl disable --now serial-getty@ttyS0.service 2>/dev/null || true
 
     write_file /etc/default/gpsd 0644 <<'GPSD'
-# Managed by uconsole-setup.sh — AIO v2 GPS on the CM4 PL011 UART.
+# Managed by uconsole/setup.sh — AIO v2 GPS on the CM4 PL011 UART.
 START_DAEMON="true"
 USBAUTO="false"
 DEVICES="/dev/ttyS0"
@@ -1096,7 +1048,7 @@ GPSD
     # sed-ing structured YAML in place is a good way to break a config.
     if [[ -d /etc/meshtasticd/config.d ]] || $DRY_RUN; then
       write_file /etc/meshtasticd/config.d/uconsole-aio-v2.yaml 0644 <<'MESHYAML'
-# Managed by uconsole-setup.sh — HackerGadgets AIO v2 (SX1262) on uConsole CM4.
+# Managed by uconsole/setup.sh — HackerGadgets AIO v2 (SX1262) on uConsole CM4.
 Lora:
   Module: sx1262
   DIO2_AS_RF_SWITCH: true
@@ -1134,7 +1086,7 @@ MESHYAML
 
     # The DVB-T driver claims the dongle on plug-in and starves SDR software.
     write_file /etc/modprobe.d/blacklist-rtl8xxxu.conf 0644 <<'BLACKLIST'
-# Managed by uconsole-setup.sh — keep the DVB-T driver off the RTL-SDR.
+# Managed by uconsole/setup.sh — keep the DVB-T driver off the RTL-SDR.
 blacklist dvb_usb_rtl28xxu
 blacklist rtl2832
 blacklist rtl2830
@@ -1182,7 +1134,7 @@ BLACKLIST
 
       write_file /usr/local/sbin/gqrx-bookmarks-to-sdrpp 0755 <<'GQRXCONV'
 #!/usr/bin/env python3
-"""Managed by uconsole-setup.sh — carry gqrx bookmarks over to SDR++.
+"""Managed by uconsole/setup.sh — carry gqrx bookmarks over to SDR++.
 
 gqrx stores bookmarks as semicolon-delimited CSV with two sections: tag lines
 (2 fields) and bookmark lines (5 fields: frequency; name; modulation;
@@ -1380,7 +1332,7 @@ GQRXCONV
     # rig control are not, since those depend on the radio attached here.
     write_file /usr/local/sbin/js8call-ghostnet-config 0755 <<'JS8CONF'
 #!/usr/bin/env python3
-"""Managed by uconsole-setup.sh — apply the GhostNet JS8Call configuration.
+"""Managed by uconsole/setup.sh — apply the GhostNet JS8Call configuration.
 
 Migrated selectively from a working macOS JS8Call install. Only portable keys
 are written: identity, groups, heartbeat/autoreply behaviour, and the dial

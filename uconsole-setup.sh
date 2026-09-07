@@ -28,28 +28,15 @@
 # ---------------------------------------------------------------------------
 # Getting an OS onto the uConsole first
 #
-#   1. Download a Bookworm image. Two sources, and they are different things:
-#
-#      a) CI-built, on GitHub (what these notes assume):
-#           https://github.com/crossplatformdev/uConsole-Image-Builder/releases
-#         One unified image covers CM3/CM4/CM5, hence "all" in the filename:
-#           uconsole-bookworm-all-xfce.img.xz   (~827 MB, good default)
-#           uconsole-bookworm-all-lxde.img.xz   (~790 MB, lightest)
-#         CAUTION: releases are tagged per distribution, so the one GitHub
-#         marks "Latest" is whichever built most recently -- often Jammy or
-#         Trixie. Pick the release with -bookworm- in its tag, not "Latest".
-#
-#      b) Rex's image, which is NOT on GitHub -- he publishes no images there,
-#         only source. Files are named ClockworkPi-Bookworm-6.12.y.img.xz and
-#         live on:
-#           https://mega.nz/folder/LSInGD6J#0YezWX8xC4PkbyForgl1Hw
-#           https://drive.google.com/drive/folders/1tw2uPVPsFDhQ5Onx4mlllYexUDmDp0eK
-#           https://app.drime.cloud/drive/s/O3faUnk9ihg2vlrgek0LiaHRiU3fGb
-#         linked from the forum thread:
-#           https://forum.clockworkpi.com/t/bookworm-6-12-y-for-the-uconsole-and-devterm/15847
-#
-#      Either works with this script. Rex's ships his apt repo preconfigured;
-#      on a CI image this script adds that repo itself (see the note below).
+#   1. Download Rex's Bookworm image, ClockworkPi-Bookworm-6.12.y.img.xz. Rex
+#      publishes no images on GitHub -- his GitHub holds only source (pi-gen,
+#      the kernel tree, the apt repo) -- so the images live on:
+#        https://mega.nz/folder/LSInGD6J#0YezWX8xC4PkbyForgl1Hw
+#        https://drive.google.com/drive/folders/1tw2uPVPsFDhQ5Onx4mlllYexUDmDp0eK
+#        https://app.drime.cloud/drive/s/O3faUnk9ihg2vlrgek0LiaHRiU3fGb
+#      all linked from the forum thread, which is also where the current
+#      release and any per-version caveats are announced:
+#        https://forum.clockworkpi.com/t/bookworm-6-12-y-for-the-uconsole-and-devterm/15847
 #
 #   2. Write it with Raspberry Pi Imager: Choose OS -> Use custom -> pick the
 #      .xz (it decompresses on the fly). Balena Etcher works too. Imager's
@@ -59,26 +46,22 @@
 #   3. Target is a microSD card. A CM4 *with* eMMC has no SD lines wired up and
 #      must be flashed over USB with rpiboot/usbboot instead; CM4 Lite uses SD.
 #
-#   4. First boot expands the filesystem and reboots by itself. On the CI
-#      images the default login is clockworkpi / clockworkpi, which also has
-#      PASSWORDLESS SUDO -- a known-credential account with unprompted root.
-#      Create your own account and get rid of it:
+#   4. First boot expands the filesystem and reboots by itself. Log in with the
+#      image's default account -- the forum thread is the authoritative source
+#      for it; sources disagree between pi/clockworkpi and clockwork/clockwork,
+#      so do not count on either -- then create your own account and drop the
+#      default one, which has a publicly known password:
 #        sudo adduser jroemer && sudo adduser jroemer sudo
-#        # log in as jroemer, confirm sudo works, then:
-#        sudo deluser --remove-home clockworkpi
+#        # log in as jroemer, confirm sudo works, then remove the default user
 #      Then run this script. It will not create the account for you: the
 #      password policy and sudo membership are not decisions it should be
 #      making silently.
 #
-#   NOTE on Rex vs. the CI builder: Rex is ak-rex on GitHub, and his repos
-#   hold only source (pi-gen, the kernel tree, the apt repo). The CI builder
-#   is a separate GPL-3.0 project by crossplatformdev that consumes Rex's
-#   kernel patch -- related, but not his images.
-#
-#   That distinction used to matter here, because `sdrpp` and the HackerGadgets
-#   AIO metapackage are in Rex's apt repo rather than Debian. This script now
-#   adds that repo itself (served from github.com/ak-rex/akrex-arm-repo), so
-#   either image ends up with the same packages. --no-akrex-repo opts out.
+#   Rex's image ships his apt repo (github.com/ak-rex/akrex-arm-repo) already
+#   configured, which is where sdrpp and the HackerGadgets AIO metapackage come
+#   from rather than Debian. This script checks for that repo and adds it only
+#   if missing, so it also works on a stock Bookworm image. --no-akrex-repo
+#   opts out.
 # ---------------------------------------------------------------------------
 
 main() {

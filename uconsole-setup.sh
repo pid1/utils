@@ -48,11 +48,16 @@
 #        sudo adduser jroemer && sudo adduser jroemer sudo
 #      ...and run this script.
 #
-#   NOTE: these CI-built images are not Rex's Bookworm image, which is hosted
-#   off GitHub (MEGA / Google Drive / Drime) via the ClockworkPi forum. Rex's
-#   apt repo is where `sdrpp` and `hackergadgets-uconsole-aio-board` come from,
-#   so on a CI image those may be absent — this script probes for each and
-#   falls back rather than failing.
+#   NOTE: these CI-built images are NOT Rex's image. Rex (ak-rex) publishes no
+#   images on GitHub at all — his are on MEGA / Google Drive / Drime, linked
+#   from the ClockworkPi forum, and his GitHub holds only source (pi-gen, the
+#   kernel tree, the apt repo). The CI builder is a separate GPL-3.0 project by
+#   crossplatformdev that consumes Rex's kernel patch.
+#
+#   That distinction used to matter, because `sdrpp` and the HackerGadgets AIO
+#   metapackage live in Rex's apt repo rather than Debian. This script now adds
+#   that repo itself (it is served from a GitHub repo, ak-rex/akrex-arm-repo),
+#   so either image gets the same packages. Pass --no-akrex-repo to opt out.
 # ---------------------------------------------------------------------------
 
 main() {
@@ -65,6 +70,13 @@ main() {
   local AIOV2_REPO=https://github.com/hackergadgets/aiov2_ctl.git
   local AIOV2_DIR=/opt/aiov2_ctl
   local MESHTASTIC_REPO=http://download.opensuse.org/repositories/network:/Meshtastic:/beta/Raspbian_12/
+  # Rex (ak-rex) maintains the ClockworkPi apt repo that his Bookworm image
+  # ships with. It is served straight out of a GitHub repo, and carries the
+  # things Debian does not have: sdrpp, the hackergadgets AIO metapackage,
+  # pinctrl, and the rtlsdrblog fork of rtl-sdr.
+  local AKREX_BASE=https://raw.githubusercontent.com/ak-rex/akrex-arm-repo/main/bookworm
+  local AKREX_KEYRING=/etc/apt/keyrings/ak-rex.gpg
+  local AKREX_LIST=/etc/apt/sources.list.d/ak-rex.list
 
   # AIO v2 puts each subsystem behind a GPIO-switched power rail. Nothing on
   # the board responds until these are driven high. (V1 had no such gating.)
@@ -97,12 +109,14 @@ main() {
   # --------------------------------------------------------------- arg parse
 
   local DRY_RUN=false
+  local ADD_AKREX_REPO=true
   local DESKTOP_USER=""
   local -a ONLY=() SKIP=()
 
   while (( $# )); do
     case $1 in
       --dry-run)      DRY_RUN=true ;;
+      --no-akrex-repo) ADD_AKREX_REPO=false ;;
       --user)         DESKTOP_USER=${2:?--user needs a value}; shift ;;
       --user=*)       DESKTOP_USER=${1#*=} ;;
       --only)         ONLY+=("${2:?--only needs a section}"); shift ;;
@@ -110,7 +124,7 @@ main() {
       --skip)         SKIP+=("${2:?--skip needs a section}"); shift ;;
       --skip=*)       SKIP+=("${1#*=}") ;;
       -h|--help)
-        printf 'usage: uconsole-setup.sh [--dry-run] [--user NAME] [--only SECTION]... [--skip SECTION]...\n'
+        printf 'usage: uconsole-setup.sh [--dry-run] [--no-akrex-repo] [--user NAME] [--only SECTION]... [--skip SECTION]...\n'
         printf 'sections: %s\n' "${ALL_SECTIONS[*]}"
         return 0 ;;
       *) printf 'unknown argument: %s\n' "$1" >&2; return 2 ;;
@@ -169,6 +183,47 @@ main() {
     stripped=$(sed "\|^${BEGIN_MARK}\$|,\|^${END_MARK}\$|d" "$file")
     printf '%s\n\n%s\n%s\n%s\n' \
       "$stripped" "$BEGIN_MARK" "$content" "$END_MARK" | write_file "$file" 0644
+  }
+
+  local AKREX_DONE=false
+  ensure_akrex_repo() {
+    $ADD_AKREX_REPO || return 0
+    $AKREX_DONE && return 0
+    AKREX_DONE=true
+
+    # Already configured (Rex's own image ships it) — nothing to do.
+    if [[ -f $AKREX_LIST ]] || pkg_available sdrpp; then
+      log "ak-rex apt repo already available"
+      return 0
+    fi
+
+    section "Adding Rex's ClockworkPi apt repo"
+    if $DRY_RUN; then
+      log "[dry-run] add ${AKREX_BASE} stable main"
+      return 0
+    fi
+
+    mkdir -p /etc/apt/keyrings
+    if ! curl -fsSL --max-time 30 "${AKREX_BASE}/KEY.gpg" \
+         | gpg --dearmor --yes -o "$AKREX_KEYRING"; then
+      warn "could not fetch ak-rex signing key — continuing without the repo"
+      return 0
+    fi
+    chmod 0644 "$AKREX_KEYRING"
+
+    # signed-by scopes this key to this repo only. The upstream README drops
+    # the key in trusted.gpg.d, which would trust it for every configured
+    # repo; there is no reason to grant it that.
+    printf 'deb [arch=arm64 signed-by=%s] %s stable main\n' \
+      "$AKREX_KEYRING" "$AKREX_BASE" > "$AKREX_LIST"
+
+    if apt-get update -y; then
+      log "ak-rex repo added (sdrpp, hackergadgets AIO, pinctrl, rtl-sdr)"
+    else
+      warn "apt update failed after adding the ak-rex repo — removing it again"
+      rm -f "$AKREX_LIST" "$AKREX_KEYRING"
+      apt-get update -y || true
+    fi
   }
 
   want() {
@@ -440,6 +495,7 @@ CRON
   local AIO_VIA_PACKAGE=false
   if want aio; then
     section "HackerGadgets AIO v2 board"
+    ensure_akrex_repo
 
     if pkg_available hackergadgets-uconsole-aio-board; then
       log "vendor metapackage available — using it"
@@ -478,7 +534,7 @@ CRON
     else
       # Fallback: raw pinctrl plus our own oneshot, so the board still comes
       # up with its rails on even without the vendor tooling.
-      apt_install raspi-utils || true
+      apt_install pinctrl || apt_install raspi-utils || true
       write_file /usr/local/sbin/uconsole-aio-rails 0755 <<'RAILS'
 #!/bin/sh
 # Managed by uconsole-setup.sh — AIO v2 power rails (GPS/LoRa/SDR/USB hub).
@@ -605,6 +661,7 @@ GPSD
 
   if want lora; then
     section "LoRa / Meshtastic"
+    ensure_akrex_repo
 
     apt_install libgpiod-dev libyaml-cpp-dev libbluetooth-dev libusb-1.0-0-dev \
                 libi2c-dev openssl libssl-dev
@@ -674,6 +731,7 @@ MESHYAML
 
   if want sdr; then
     section "SDR"
+    ensure_akrex_repo
     apt_install rtl-sdr librtlsdr0
 
     # The DVB-T driver claims the dongle on plug-in and starves SDR software.

@@ -473,6 +473,11 @@ CRON
     write_file "$USER_HOME/.config/i3/config" 0644 <<'I3CONF'
 # Managed by uconsole-setup.sh -- edits here are overwritten on the next run.
 
+# $mod is the uConsole's CMD key. Its firmware defines
+#   #define _CMD_KEY KEY_RIGHT_GUI      (Code/uconsole_keyboard/keymaps.ino)
+# which X sees as Super_R, i.e. mod4. RIGHT_GUI is the only GUI key the
+# keyboard emits -- there is no left Super -- so CMD is the one and only
+# modifier key for everything below. Confirm with: xmodmap -pm
 set $mod Mod4
 
 # 12pt is a starting point for the 5" 720p panel (~290 DPI); raise if small.

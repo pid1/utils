@@ -322,6 +322,13 @@ main() {
     run ssh-keygen -A
     log "ssh host keys present"
 
+    # pi-gen's stage2 contains both `systemctl enable ssh` and
+    # `systemctl disable ssh` behind a build-time condition, so whether the
+    # image arrives with a listener is not something to assume either way.
+    apt_install openssh-server
+    run systemctl enable --now ssh
+    log "sshd enabled and listening on 22"
+
     apt_install curl ca-certificates gnupg git
 
     # GitHub-backed authorized_keys sync. The original one-liner redirected
@@ -394,6 +401,72 @@ CRON
     run /usr/local/sbin/sync-github-keys || warn "initial key sync failed (network?); cron will retry"
     log "github key sync installed (${GH_KEY_USER}, every 5 min)"
 
+    # One command for routine upkeep: package updates plus a re-apply of this
+    # script, which is idempotent and so only changes what has drifted or is
+    # newly added. /usr/local/bin rather than sbin -- Debian keeps sbin off a
+    # normal user's PATH, so `sudo cpi` would not resolve.
+    write_file /usr/local/bin/cpi 0755 <<'CPIMAINT'
+#!/bin/bash
+# Managed by uconsole/setup.sh — daily maintenance.
+#
+#   sudo cpi              update packages, then re-apply configuration
+#   sudo cpi --dry-run    show what the config step would change
+#
+# Arguments pass through to setup.sh, so --only/--skip work here too.
+set -euo pipefail
+
+PRIMARY=https://pid1.space/cpi
+FALLBACK=https://raw.githubusercontent.com/pid1/utils/main/uconsole/setup.sh
+
+if [ "$(id -u)" -ne 0 ]; then
+    echo "cpi: needs root — run: sudo cpi $*" >&2
+    exit 1
+fi
+
+export DEBIAN_FRONTEND=noninteractive
+
+echo "== packages"
+# Benign Release metadata changes (Debian point releases, Rex relabelling his
+# repo) would otherwise abort the update. Origin/Codename/Suite still stop it.
+apt-get update -y \
+    --allow-releaseinfo-change-version \
+    --allow-releaseinfo-change-label \
+    || echo "cpi: apt update reported errors, continuing" >&2
+apt-get full-upgrade -y
+apt-get autoremove --purge -y
+
+echo
+echo "== configuration"
+tmp=$(mktemp)
+trap 'rm -f "$tmp"' EXIT
+
+if curl -fsSL --max-time 30 "$PRIMARY" -o "$tmp" \
+   || curl -fsSL --max-time 30 "$FALLBACK" -o "$tmp"; then
+    # Downloaded to a file rather than piped, so a truncated transfer is caught
+    # here instead of part-executing. Same checks the publish workflow applies:
+    # the body lives inside main(), so a file missing its trailing invocation
+    # parses fine and then silently does nothing.
+    if bash -n "$tmp" \
+       && head -1 "$tmp" | grep -qx '#!/usr/bin/env bash' \
+       && tail -1 "$tmp" | grep -qx 'main "\$@"'; then
+        bash "$tmp" "$@"
+    else
+        echo "cpi: downloaded setup.sh failed verification; config step skipped" >&2
+        exit 1
+    fi
+else
+    echo "cpi: could not fetch setup.sh from either URL; config step skipped" >&2
+    exit 1
+fi
+
+if [ -f /var/run/reboot-required ]; then
+    echo
+    echo "== reboot required"
+    sed 's/^/   /' /var/run/reboot-required.pkgs 2>/dev/null || true
+fi
+CPIMAINT
+    log "installed the 'cpi' maintenance command"
+
     # Hardware group membership — required for the AIO peripherals to be
     # usable without sudo. Only add groups that actually exist on this image.
     local g present=()
@@ -405,6 +478,8 @@ CRON
       run usermod -aG "$joined" "$DESKTOP_USER"
       log "added $DESKTOP_USER to: ${present[*]}"
       note "Group changes need a full logout/login (or reboot) before they apply."
+    note "Routine upkeep is one command: 'sudo cpi' — apt update + full-upgrade + autoremove, then re-applies this script (idempotent, so only drift changes). 'sudo cpi --dry-run' previews the config half."
+    note "SSH is listening on 22, keys synced from github.com/${GH_KEY_USER}.keys. Password auth is still enabled — turn it off in /etc/ssh/sshd_config once key login is confirmed working."
     fi
   fi
 

@@ -76,7 +76,7 @@ Every section is skippable with `--skip NAME`, or run alone with `--only NAME`.
 
 | Section | What it does |
 |---|---|
-| `base` | Timezone (America/Chicago), hushlogin, SSH host keys, GitHub-backed `authorized_keys` sync, hardware group membership |
+| `base` | Timezone (America/Chicago), hushlogin, sshd enabled, GitHub-backed `authorized_keys` sync, the `cpi` maintenance command, hardware group membership |
 | `desktop` | X11 + i3, autologin on tty1, Alacritty, Atkinson fonts, PipeWire, blanking disabled |
 | `claude` | Claude Code from Anthropic's signed apt repo |
 | `aio` | HackerGadgets AIO v2 metapackage, GPIO power rails, boot overlays |
@@ -108,6 +108,55 @@ curl -fsSL pid1.space/cpi | sudo bash -s -- --only sdr --skip lora
 
 ```bash
 curl -fsSL pid1.space/cpi | sudo TS_AUTHKEY=tskey-auth-... bash -s -- --only tailscale
+```
+
+---
+
+## Routine maintenance
+
+```bash
+sudo cpi
+```
+
+One command, installed by the `base` section:
+
+1. `apt update`, `apt full-upgrade`, `apt autoremove --purge`
+2. re-fetches and re-applies `setup.sh` — idempotent, so only drift and newly
+   added configuration change
+3. reports whether a reboot is pending, and which packages want one
+
+Arguments pass through, so `sudo cpi --dry-run` previews the configuration
+half without touching anything, and `sudo cpi --only sdr` narrows it.
+
+Kernel updates arrive here too — Rex ships `clockworkpi-kernel` through his
+repo, so `full-upgrade` picks them up and the reboot notice will say so.
+
+It fetches from `pid1.space/cpi`, falling back to the raw URL, and downloads to
+a file rather than piping — a truncated transfer is then caught by the same
+checks the publish workflow uses (`bash -n`, shebang, and the trailing
+`main "$@"` without which the script would parse cleanly and do nothing).
+
+---
+
+## SSH
+
+Enabled and listening on 22 by the `base` section. pi-gen's stage2 contains
+both `systemctl enable ssh` and `systemctl disable ssh` behind a build-time
+condition, so the image's state is not assumable either way.
+
+`authorized_keys` is refreshed from `github.com/pid1.keys` every 5 minutes for
+both `root` and the desktop user, via `/usr/local/sbin/sync-github-keys`. It
+fetches to a temp file, requires the result to be non-empty and to parse as SSH
+public keys, and only then swaps it in atomically — a GitHub outage can never
+empty the file and lock you out. It also only rewrites when the content
+actually changed, which matters against an SD card.
+
+**Password authentication is still on.** Once you have confirmed key login
+works, turn it off:
+
+```bash
+sudo sed -i 's/^#\?PasswordAuthentication .*/PasswordAuthentication no/' /etc/ssh/sshd_config
+sudo systemctl restart ssh
 ```
 
 ---
@@ -243,6 +292,7 @@ sudo hwclock -w                       # seed it once, when NTP time is good
 rtl_test -t                           # SDR enumerated (its rail is on by default)
 sudo aiov2_ctl GPS on && cgps -s      # GPS rail is OFF by default
 claude                                # log in via browser prompt
+ssh jroemer@clockworkpi.local         # from another machine
 sudo tailscale up                     # unless TS_AUTHKEY was passed
 ```
 

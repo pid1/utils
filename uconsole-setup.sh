@@ -544,6 +544,12 @@ bindsym $mod+Shift+e exec "i3-nagbar -t warning -m 'Exit i3?' -B 'Yes' 'i3-msg e
 # --- hardware keys ----------------------------------------------------------
 bindsym XF86MonBrightnessUp   exec brightnessctl set +10%
 bindsym XF86MonBrightnessDown exec brightnessctl set 10%-
+
+# Automatic blanking is disabled (the panel does not survive DPMS), so this is
+# the deliberate way to kill the backlight on battery. Brightness-up restores
+# it; --save/--restore keeps the previous level.
+bindsym $mod+Shift+b exec --no-startup-id brightnessctl --save set 0
+bindsym $mod+Shift+n exec --no-startup-id brightnessctl --restore
 bindsym XF86AudioRaiseVolume  exec wpctl set-volume @DEFAULT_AUDIO_SINK@ 5%+
 bindsym XF86AudioLowerVolume  exec wpctl set-volume @DEFAULT_AUDIO_SINK@ 5%-
 bindsym XF86AudioMute         exec wpctl set-mute   @DEFAULT_AUDIO_SINK@ toggle
@@ -717,6 +723,16 @@ case "$h" in ''|*[!0-9]*) h=0 ;; esac
 if [ -n "$out" ] && [ "$h" -gt "$w" ]; then
     xrandr --output "$out" --rotate right
 fi
+
+# The DSI panel does not reliably repaint when it comes back from DPMS -- it
+# wakes to a solid grey screen and stays there until the VT is switched away
+# and back. Rather than fight it, stop X blanking the panel at all. Backlight
+# off on demand is bound in the i3 config instead (Mod+Shift+b), which drives
+# brightnessctl and does not involve DPMS.
+xset s off
+xset s noblank
+xset -dpms
+
 exec i3
 XINITRC
 
@@ -749,6 +765,7 @@ AUTOLOGIN
     note "Desktop: tty1 autologins as $DESKTOP_USER and starts i3. Mod key is Super; Mod+Return is a terminal, Mod+d is dmenu."
     note "i3status now shows labelled CPU, RAM, temperature, disk and wifi; ethernet and battery are gone. Config: ~/.config/i3status/config (Mod+Shift+r reloads i3)."
     note "Fonts: monospace -> Atkinson Hyperlegible Mono, serif/sans-serif -> Atkinson Hyperlegible Next, via /etc/fonts/local.conf. i3 uses Mono at 12pt (~/.config/i3/config); raise it if it reads small on the 5\" panel."
+    note "Display: X blanking and DPMS are disabled, because the DSI panel wakes to a grey screen and needs a VT switch to repaint. Mod+Shift+b turns the backlight off deliberately, Mod+Shift+n restores it."
     note "Desktop: screen rotation is detected at X startup, so it is a no-op if the image already rotates the panel. If it lands sideways, edit ~/.xinitrc."
     note "Wi-Fi on a Lite image: 'sudo raspi-config' (System Options -> Wireless LAN), or nmtui if NetworkManager is in use."
   fi

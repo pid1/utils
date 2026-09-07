@@ -930,7 +930,7 @@ AUTOLOGIN
 
     log "i3 + X11 configured, autologin on tty1 as $DESKTOP_USER"
     note "Desktop: tty1 autologins as $DESKTOP_USER and starts i3. Mod is ALT: Alt+Return for a terminal, Alt+Shift+d for dmenu, Alt+Shift+q to close. Window management sits on Alt+Shift so bash keeps Alt+b/f/d/. for word motion."
-    note "i3status now shows labelled CPU, RAM, temperature, disk and wifi; ethernet and battery are gone. Config: ~/.config/i3status/config (Mod+Shift+r reloads i3)."
+    note "i3status shows battery, CPU, RAM, temperature, disk, wifi and the clock. Config: ~/.config/i3status/config (Alt+Shift+r reloads i3)."
     note "Fonts: monospace -> Atkinson Hyperlegible Mono, serif/sans-serif -> Atkinson Hyperlegible Next, via /etc/fonts/local.conf. i3 uses Mono at 12pt (~/.config/i3/config); raise it if it reads small on the 5\" panel."
     note "Display: blanking and power management are off at every layer — Xorg (10-no-blanking.conf), logind (IdleAction=ignore), the kernel console (consoleblank=0, needs the reboot) and xset in .xinitrc. Nothing locks or blanks the screen. Mod+Shift+b kills the backlight deliberately, Mod+Shift+n restores it."
     note "Desktop: screen rotation is detected at X startup, so it is a no-op if the image already rotates the panel. If it lands sideways, edit ~/.xinitrc."

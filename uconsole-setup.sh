@@ -194,6 +194,14 @@ main() {
 
   apt_install() { run apt-get install -y "$@"; }
 
+  # For optional extras: warn rather than abort. A missing optional package
+  # should not take down a whole provisioning run, and under set -e a plain
+  # apt_install would.
+  apt_install_opt() {
+    run apt-get install -y "$@" || warn "optional install failed: $*"
+    return 0
+  }
+
   # apt refuses to update a repo whose Release metadata changed, until the
   # change is confirmed. Two benign ones show up here: Debian bumping Version
   # across point releases (12.13 -> 12.15), and Rex relabelling his repo. Both
@@ -1308,7 +1316,11 @@ GQRXCONV
 
   if want ham; then
     section "Amateur radio"
-    apt_install js8call hamlib-utils python3
+    apt_install python3
+    # libhamlib-utils, not hamlib-utils: Debian names the binary package after
+    # the library. It provides rigctl/rotctl, which is what JS8Call drives a
+    # rig with.
+    apt_install_opt js8call libhamlib-utils
     log "installed js8call and hamlib-utils"
 
     # GhostNet (S2 Underground) config, migrated from a working macOS install.

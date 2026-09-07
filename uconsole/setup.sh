@@ -1100,6 +1100,19 @@ AUTOLOGIN
       note "hackergadgets-uconsole-aio-board was unavailable; boot config was written manually. If you later add Rex's ClockworkPi apt repo, the metapackage is the more maintainable path."
     fi
 
+    # The metapackage's postinst writes into the desktop user's home while
+    # running as root -- a pygpsclient venv, a .cache directory, an installer
+    # script. A root-owned .cache in particular breaks any GUI app that tries
+    # to write its own cache, so hand these back.
+    if ! $DRY_RUN; then
+      local stray
+      while IFS= read -r stray; do
+        [[ -n $stray ]] || continue
+        chown -R "${DESKTOP_USER}:${USER_GROUP}" "$stray" 2>/dev/null \
+          && log "reclaimed $(basename "$stray") from root"
+      done < <(find "$USER_HOME" -mindepth 1 -maxdepth 1 ! -user "$DESKTOP_USER" 2>/dev/null)
+    fi
+
     # aiov2_ctl drives the v2 power rails and reapplies them at boot. Install
     # it regardless of which path above ran — the metapackage may or may not
     # include it, and the rails are what make the board respond at all.
@@ -1878,6 +1891,20 @@ GQRXCONV
     # the library. It provides rigctl/rotctl, which is what JS8Call drives a
     # rig with.
     apt_install_opt js8call libhamlib-utils
+
+    # CHIRP, for programming handhelds. Debian's package rather than
+    # upstream's newer build: chirpmyradio.com's archive returns 403 to
+    # anything scripted, so a current wheel cannot be fetched unattended.
+    # Note that `chirp` on PyPI is an unrelated bioacoustics library.
+    apt_install_opt chirp
+    # The Debian package installs the binary as chirpw. Symlink the name
+    # everyone actually types, which is also what dmenu will show.
+    if [[ -x /usr/bin/chirpw ]]; then
+      run ln -sf /usr/bin/chirpw /usr/local/bin/chirp
+    fi
+
+    note "CHIRP: run 'chirp' or 'chirpw' (dmenu, Alt+Shift+d). Serial cables need the dialout group, which you have — it applies after a full re-login."
+    note "CHIRP is Debian's build and lags upstream, so a radio released since then may not be listed. For a current one, download the wheel from chirpmyradio.com in a browser (its archive blocks scripted access), then: sudo apt remove chirp && pipx install --system-site-packages ./chirp-*.whl"
     log "installed js8call and hamlib-utils"
 
     # GhostNet (S2 Underground) config, migrated from a working macOS install.

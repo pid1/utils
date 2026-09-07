@@ -84,7 +84,7 @@ Every section is skippable with `--skip NAME`, or run alone with `--only NAME`.
 | `gps` | UART + PPS overlays, serial console removed, `gpsd` on `/dev/ttyS0` |
 | `lora` | SPI overlays, `meshtasticd` with the SX1262 config, `meshtastic-ui` dashboard, region |
 | `sdr` | `sdrpp-brown`, `rtl-sdr`, DVB-T driver blacklisted, gqrx bookmarks migrated |
-| `ham` | JS8Call + hamlib, GhostNet configuration |
+| `ham` | JS8Call + hamlib, GhostNet configuration, CHIRP |
 | `tailscale` | Tailscale from its official repo |
 
 ### Flags
@@ -394,6 +394,26 @@ string, which would break on every upgrade. `meshtastic-ui` sets **no
 These use `exec`, which runs only at i3 startup — `i3-msg restart` will not
 relaunch them, by design, since `exec_always` would spawn duplicates on every
 reload.
+
+## CHIRP
+
+Radio programming, from Debian's package. Run `chirp` (symlinked) or `chirpw`
+(the actual binary name) — both appear in dmenu.
+
+Serial cables need the `dialout` group, which the `base` section grants; it
+applies after a full re-login.
+
+Debian's build lags upstream and CHIRP gains radio support continuously, so a
+recently released model may not be listed. `chirpmyradio.com` returns 403 to
+scripted requests, so a current build cannot be fetched unattended — download
+the wheel in a browser, then:
+
+```bash
+sudo apt remove chirp
+pipx install --system-site-packages ./chirp-*.whl
+```
+
+The `chirp` package on PyPI is an unrelated bioacoustics library, not this.
 
 ## Display and power
 

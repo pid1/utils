@@ -28,36 +28,57 @@
 # ---------------------------------------------------------------------------
 # Getting an OS onto the uConsole first
 #
-#   1. Download a Bookworm image from GitHub releases (one unified image covers
-#      CM3/CM4/CM5, hence "all"):
-#        https://github.com/crossplatformdev/uConsole-Image-Builder/releases
-#      For a CM4, either is a sensible pick:
-#        uconsole-bookworm-all-xfce.img.xz   (~827 MB, good default)
-#        uconsole-bookworm-all-lxde.img.xz   (~790 MB, lightest)
+#   1. Download a Bookworm image. Two sources, and they are different things:
+#
+#      a) CI-built, on GitHub (what these notes assume):
+#           https://github.com/crossplatformdev/uConsole-Image-Builder/releases
+#         One unified image covers CM3/CM4/CM5, hence "all" in the filename:
+#           uconsole-bookworm-all-xfce.img.xz   (~827 MB, good default)
+#           uconsole-bookworm-all-lxde.img.xz   (~790 MB, lightest)
+#         CAUTION: releases are tagged per distribution, so the one GitHub
+#         marks "Latest" is whichever built most recently -- often Jammy or
+#         Trixie. Pick the release with -bookworm- in its tag, not "Latest".
+#
+#      b) Rex's image, which is NOT on GitHub -- he publishes no images there,
+#         only source. Files are named ClockworkPi-Bookworm-6.12.y.img.xz and
+#         live on:
+#           https://mega.nz/folder/LSInGD6J#0YezWX8xC4PkbyForgl1Hw
+#           https://drive.google.com/drive/folders/1tw2uPVPsFDhQ5Onx4mlllYexUDmDp0eK
+#           https://app.drime.cloud/drive/s/O3faUnk9ihg2vlrgek0LiaHRiU3fGb
+#         linked from the forum thread:
+#           https://forum.clockworkpi.com/t/bookworm-6-12-y-for-the-uconsole-and-devterm/15847
+#
+#      Either works with this script. Rex's ships his apt repo preconfigured;
+#      on a CI image this script adds that repo itself (see the note below).
 #
 #   2. Write it with Raspberry Pi Imager: Choose OS -> Use custom -> pick the
 #      .xz (it decompresses on the fly). Balena Etcher works too. Imager's
-#      advanced options can preset the Wi-Fi SSID/password — worth doing, since
-#      the uConsole keyboard is a slow way to type a passphrase.
+#      advanced options can preset the Wi-Fi SSID/password -- worth doing,
+#      since the uConsole keyboard is a slow way to type a passphrase.
 #
 #   3. Target is a microSD card. A CM4 *with* eMMC has no SD lines wired up and
 #      must be flashed over USB with rpiboot/usbboot instead; CM4 Lite uses SD.
 #
-#   4. First boot expands the filesystem and reboots by itself. Then create the
-#      account this script expects:
+#   4. First boot expands the filesystem and reboots by itself. On the CI
+#      images the default login is clockworkpi / clockworkpi, which also has
+#      PASSWORDLESS SUDO -- a known-credential account with unprompted root.
+#      Create your own account and get rid of it:
 #        sudo adduser jroemer && sudo adduser jroemer sudo
-#      ...and run this script.
+#        # log in as jroemer, confirm sudo works, then:
+#        sudo deluser --remove-home clockworkpi
+#      Then run this script. It will not create the account for you: the
+#      password policy and sudo membership are not decisions it should be
+#      making silently.
 #
-#   NOTE: these CI-built images are NOT Rex's image. Rex (ak-rex) publishes no
-#   images on GitHub at all — his are on MEGA / Google Drive / Drime, linked
-#   from the ClockworkPi forum, and his GitHub holds only source (pi-gen, the
-#   kernel tree, the apt repo). The CI builder is a separate GPL-3.0 project by
-#   crossplatformdev that consumes Rex's kernel patch.
+#   NOTE on Rex vs. the CI builder: Rex is ak-rex on GitHub, and his repos
+#   hold only source (pi-gen, the kernel tree, the apt repo). The CI builder
+#   is a separate GPL-3.0 project by crossplatformdev that consumes Rex's
+#   kernel patch -- related, but not his images.
 #
-#   That distinction used to matter, because `sdrpp` and the HackerGadgets AIO
-#   metapackage live in Rex's apt repo rather than Debian. This script now adds
-#   that repo itself (it is served from a GitHub repo, ak-rex/akrex-arm-repo),
-#   so either image gets the same packages. Pass --no-akrex-repo to opt out.
+#   That distinction used to matter here, because `sdrpp` and the HackerGadgets
+#   AIO metapackage are in Rex's apt repo rather than Debian. This script now
+#   adds that repo itself (served from github.com/ak-rex/akrex-arm-repo), so
+#   either image ends up with the same packages. --no-akrex-repo opts out.
 # ---------------------------------------------------------------------------
 
 main() {

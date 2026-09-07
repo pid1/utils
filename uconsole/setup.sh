@@ -1496,7 +1496,9 @@ GQRXCONV
       note "gqrx bookmarks imported into SDR++ (Module list -> Frequency Manager). gqrx config untouched; tarball backup in \$HOME."
     fi
 
-    note "SDR needs the antenna on the 'SDR' IPEX pad. The SDR and internal-USB rails come up at boot; GPS and LoRa do not — see the README for turning those on."
+    note "SDR needs the antenna on the 'SDR' IPEX pad (the GPS pad is a separate path). The SDR and internal-USB rails come up at boot; GPS and LoRa do not — see the README for turning those on."
+    note "SDR++ starts RTL-SDR gain at 0, which looks identical to a dead device: an empty, flat waterfall. Select the source, press play, then raise gain — and test against a strong FM broadcast (88-108 MHz) before anything weak."
+    note "If the waterfall stays empty, prove the hardware first with 'rtl_test -t' and 'timeout 10 rtl_test -s 2400000'. The dongle is behind the AIO's internal USB hub, so 'lost at least N bytes' there means drop the sample rate rather than chase SDR++ settings."
   fi
 
   # --------------------------------------------------------------------- ham

@@ -241,6 +241,29 @@ local BOOT_RAILS=(SDR USB GPS)
 A re-run never forces GPS or LoRa *off*, so a rail you switched on by hand
 survives until you reboot.
 
+### Empty waterfall in SDR++
+
+A working device and a dead one look the same in SDR++, so check in this order:
+
+1. **Gain starts at 0.** This is the usual cause. Raise the gain slider.
+2. **Press play.** A stopped SDR++ shows an empty waterfall, not an error.
+3. **Source → RTL-SDR → Refresh**, then select the device. It will not
+   auto-select one that appeared after launch.
+4. **Test on a strong FM broadcast** (88–108 MHz) before anything weak.
+5. Check the waterfall **min/max dB** sliders have not collapsed together.
+
+Prove the hardware independently of SDR++ first:
+
+```bash
+rtl_test -t                     # tuner type, and that the device opens
+timeout 10 rtl_test -s 2400000  # sample rate; watch for "lost at least N bytes"
+```
+
+Sample loss points at USB rather than software — the dongle sits behind the
+AIO's internal hub, so lower the sample rate rather than chasing SDR++
+settings. The antenna belongs on the pad marked **SDR**; the GPS pad is a
+separate path and will not feed the dongle.
+
 ### Checking
 
 ```bash

@@ -1217,6 +1217,38 @@ blacklist rtl2830
 BLACKLIST
     log "blacklisted the DVB-T kernel drivers"
 
+    # A blacklist only stops the module loading next boot; if it is already
+    # bound to the dongle, the device stays claimed until it is unloaded.
+    if ! $DRY_RUN; then
+      local mod
+      for mod in dvb_usb_rtl28xxu rtl2832 rtl2830; do
+        if lsmod 2>/dev/null | grep -q "^${mod} "; then
+          modprobe -r "$mod" 2>/dev/null \
+            && log "unloaded $mod (was holding the dongle)" \
+            || warn "$mod is loaded and would not unload — reboot to release the SDR"
+        fi
+      done
+    fi
+
+    # Report what is actually there, rather than leaving a silent failure to
+    # be discovered later in SDR++. The rails matter here: the RTL-SDR sits
+    # behind the AIO's internal USB hub, so SDR alone is not enough.
+    if ! $DRY_RUN; then
+      if lsusb 2>/dev/null | grep -qiE 'RTL2832|RTL2838|Realtek.*DVB|0bda:2838'; then
+        log "RTL-SDR present on USB"
+        if command -v rtl_test >/dev/null 2>&1; then
+          if timeout 10 rtl_test -t </dev/null >/dev/null 2>&1; then
+            log "rtl_test: device opens cleanly"
+          else
+            warn "RTL-SDR enumerates but rtl_test cannot open it — check the plugdev group (needs re-login) or a driver still holding it"
+          fi
+        fi
+      else
+        warn "no RTL-SDR on USB. Check the power rails: 'pinctrl get ${RAIL_SDR}' and 'pinctrl get ${RAIL_USB}' should read hi, and the dongle sits behind the internal USB hub so both are needed."
+        note "SDR not detected on USB. Turn the rails on with 'sudo uconsole-aio-rails on' (or 'sudo aiov2_ctl SDR on; sudo aiov2_ctl USB on'), then re-check with 'lsusb | grep -i rtl'."
+      fi
+    fi
+
     # SDR++Brown rather than mainline SDR++, chosen for this hardware. The
     # deciding factor is the waterfall: the fork does not re-upload a full
     # image to the GPU every frame, and its zoom/regeneration is vectorised

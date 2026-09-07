@@ -4,6 +4,15 @@ Provisioning for a **ClockworkPi uConsole (CM4 Lite)** running **Rex's Debian
 Bookworm image**, with the **HackerGadgets AIO v2** extension board.
 
 ```bash
+curl -fsSL pid1.space/cpi | sudo bash
+```
+
+`pid1.space/cpi` is a mirror of `uconsole/setup.sh`, published to
+`pid1.github.io` by [`publish-cpi.yml`](../.github/workflows/publish-cpi.yml)
+whenever this script changes. This repo is the source of truth; the raw URL
+works too:
+
+```bash
 curl -fsSL https://raw.githubusercontent.com/pid1/utils/main/uconsole/setup.sh | sudo bash
 ```
 
@@ -83,14 +92,14 @@ Flags must go through `bash -s --`, since `| sudo bash --dry-run` hands the flag
 to bash rather than to the script:
 
 ```bash
-curl -fsSL <url> | sudo bash -s -- --dry-run
-curl -fsSL <url> | sudo bash -s -- --only sdr --skip lora
+curl -fsSL pid1.space/cpi | sudo bash -s -- --dry-run
+curl -fsSL pid1.space/cpi | sudo bash -s -- --only sdr --skip lora
 ```
 
 `sudo` scrubs the environment, so `TS_AUTHKEY` must be set **after** `sudo`:
 
 ```bash
-curl -fsSL <url> | sudo TS_AUTHKEY=tskey-auth-... bash -s -- --only tailscale
+curl -fsSL pid1.space/cpi | sudo TS_AUTHKEY=tskey-auth-... bash -s -- --only tailscale
 ```
 
 ---

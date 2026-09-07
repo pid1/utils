@@ -4,7 +4,7 @@
 # with the HackerGadgets AIO v2 board. See README.md in this directory for
 # what it installs, key bindings, and post-install steps.
 #
-#   curl -fsSL https://raw.githubusercontent.com/pid1/utils/main/uconsole/setup.sh | sudo bash
+#   curl -fsSL pid1.space/cpi | sudo bash        (mirror of this file)
 #
 # Flags must go through `bash -s --`; `| sudo bash --dry-run` hands the flag to
 # bash instead of to this script:

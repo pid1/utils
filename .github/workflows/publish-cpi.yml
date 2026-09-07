@@ -1,0 +1,84 @@
+name: publish cpi
+
+# Mirrors uconsole/setup.sh to pid1.github.io as /cpi, so the install line is
+#   curl -fsSL pid1.space/cpi | sudo bash
+# GitHub Pages cannot redirect server-side, and a meta-refresh page would pipe
+# HTML into bash, so the file has to genuinely exist at that path. This repo
+# stays the single source of truth; the copy in the site repo is generated.
+#
+# Requires a secret named SITE_PUSH_TOKEN: a fine-grained PAT scoped to
+# pid1/pid1.github.io only, with Contents: Read and write.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - uconsole/setup.sh
+      - .github/workflows/publish-cpi.yml
+  workflow_dispatch:
+
+# Only the site checkout needs write access, and it uses the PAT for that.
+permissions:
+  contents: read
+
+concurrency:
+  group: publish-cpi
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out utils
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # Anything published here gets piped straight into a root shell by
+      # whoever runs the install line, so refuse to publish a script that is
+      # syntactically broken or truncated.
+      - name: Verify the script before publishing
+        run: |
+          set -euo pipefail
+          script=uconsole/setup.sh
+
+          bash -n "$script"
+
+          head -1 "$script" | grep -qx '#!/usr/bin/env bash' \
+            || { echo "::error::missing or unexpected shebang"; exit 1; }
+
+          # The body lives inside main(); without the trailing invocation the
+          # published file would parse cleanly and then do nothing at all.
+          tail -1 "$script" | grep -qx 'main "\$@"' \
+            || { echo "::error::script does not end with 'main \"\$@\"'"; exit 1; }
+
+          echo "verified $(wc -l < "$script") lines"
+
+      - name: Check out the site
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: pid1/pid1.github.io
+          token: ${{ secrets.SITE_PUSH_TOKEN }}
+          path: site
+
+      - name: Update /cpi
+        run: install -m 0644 uconsole/setup.sh site/cpi
+
+      - name: Commit and push if changed
+        working-directory: site
+        run: |
+          set -euo pipefail
+
+          # --porcelain rather than `git diff`, so a first run where cpi is
+          # still untracked is detected as a change rather than skipped.
+          if [ -z "$(git status --porcelain -- cpi)" ]; then
+            echo "cpi already matches uconsole/setup.sh; nothing to publish."
+            exit 0
+          fi
+
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add cpi
+          git commit -m "Publish /cpi from pid1/utils@${GITHUB_SHA:0:7}"
+          git push
+          echo "published; live at https://pid1.space/cpi once Pages rebuilds"

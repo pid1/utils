@@ -90,6 +90,11 @@ main() {
   local AKREX_BASE=https://raw.githubusercontent.com/ak-rex/akrex-arm-repo/main/bookworm
   local AKREX_KEYRING=/etc/apt/keyrings/ak-rex.gpg
   local AKREX_LIST=/etc/apt/sources.list.d/ak-rex.list
+  # Anthropic's release signing key, per code.claude.com/docs/en/setup.
+  local CLAUDE_KEY_URL=https://downloads.claude.ai/keys/claude-code.asc
+  local CLAUDE_KEY=/etc/apt/keyrings/claude-code.asc
+  local CLAUDE_KEY_FP=31DDDE24DDFAB679F42D7BD2BAA929FF1A7ECACE
+  local CLAUDE_LIST=/etc/apt/sources.list.d/claude-code.list
 
   # AIO v2 puts each subsystem behind a GPIO-switched power rail. Nothing on
   # the board responds until these are driven high. (V1 had no such gating.)
@@ -98,7 +103,7 @@ main() {
   local BEGIN_MARK='# >>> uconsole-setup >>>'
   local END_MARK='# <<< uconsole-setup <<<'
 
-  local ALL_SECTIONS=(base desktop games aio rtc gps lora sdr ham tailscale)
+  local ALL_SECTIONS=(base desktop claude games aio rtc gps lora sdr ham tailscale)
 
   # Game/emulator packages shipped in the stock uConsole image. This is an
   # explicit allowlist rather than a `uconsole-*` glob on purpose: the kernel,
@@ -708,6 +713,55 @@ AUTOLOGIN
     note "Fonts: monospace -> Atkinson Hyperlegible Mono, serif/sans-serif -> Atkinson Hyperlegible Next, via /etc/fonts/local.conf. i3 uses Mono at 12pt (~/.config/i3/config); raise it if it reads small on the 5\" panel."
     note "Desktop: screen rotation is detected at X startup, so it is a no-op if the image already rotates the panel. If it lands sideways, edit ~/.xinitrc."
     note "Wi-Fi on a Lite image: 'sudo raspi-config' (System Options -> Wireless LAN), or nmtui if NetworkManager is in use."
+  fi
+
+  # ------------------------------------------------------------------ claude
+
+  if want claude; then
+    section "Claude Code"
+
+    # The signed apt repo rather than the native curl|bash installer. That
+    # installer puts everything under $HOME and explicitly refuses to run
+    # under sudo -- here it would either abort or land in /root/.local/bin,
+    # where the desktop user's shell would never find it. apt also makes this
+    # step idempotent for free and folds updates into the normal upgrade path.
+    if ! pkg_available claude-code; then
+      apt_install curl gnupg
+      if $DRY_RUN; then
+        log "[dry-run] add downloads.claude.ai apt repo (key ${CLAUDE_KEY_FP})"
+      else
+        install -d -m 0755 /etc/apt/keyrings
+        if curl -fsSL --max-time 30 "$CLAUDE_KEY_URL" -o "$CLAUDE_KEY"; then
+          # Check the key is the expected one before trusting it. A truncated
+          # or captive-portal-mangled download otherwise shows up much later
+          # as an opaque NO_PUBKEY error, and a substituted key would be worse.
+          local fp
+          fp=$(gpg --show-keys --with-colons "$CLAUDE_KEY" 2>/dev/null \
+               | awk -F: '/^fpr:/{print $10; exit}')
+          if [[ $fp == "$CLAUDE_KEY_FP" ]]; then
+            printf 'deb [signed-by=%s] https://downloads.claude.ai/claude-code/apt/stable stable main\n' \
+              "$CLAUDE_KEY" > "$CLAUDE_LIST"
+            apt_update_soft
+            log "added the Claude Code apt repo (key verified)"
+          else
+            rm -f "$CLAUDE_KEY"
+            warn "claude-code signing key fingerprint mismatch (got '${fp:-none}', expected $CLAUDE_KEY_FP) — repo NOT added"
+          fi
+        else
+          warn "could not fetch the Claude Code signing key"
+        fi
+      fi
+    fi
+
+    if pkg_available claude-code || $DRY_RUN; then
+      apt_install claude-code
+      log "installed claude-code"
+      note "Claude Code: run 'claude' to start; log in via the browser prompt. Needs a Pro/Max/Team/Enterprise or Console account (the free plan does not include it)."
+      note "Claude Code installed from apt does not auto-update: 'sudo apt upgrade claude-code'."
+    else
+      warn "claude-code not available from apt"
+      note "Claude Code was not installed. Fall back to the native installer, run as your own user and NOT with sudo: curl -fsSL https://claude.ai/install.sh | bash"
+    fi
   fi
 
   # ------------------------------------------------------------------- games

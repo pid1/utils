@@ -51,11 +51,12 @@
 #      for it; sources disagree between pi/clockworkpi and clockwork/clockwork,
 #      so do not count on either -- then create your own account and drop the
 #      default one, which has a publicly known password:
-#        sudo adduser jroemer && sudo adduser jroemer sudo
-#        # log in as jroemer, confirm sudo works, then remove the default user
-#      Then run this script. It will not create the account for you: the
-#      password policy and sudo membership are not decisions it should be
-#      making silently.
+#      This script offers to do it for you: if the account is missing it
+#      prompts, and hands the password prompt to adduser itself, so no
+#      credential is ever typed into this script, echoed, or stored here.
+#      Verify you can log in as the new account and that sudo works BEFORE
+#      removing the default one:
+#        sudo deluser --remove-home <default-user>
 #
 #   Rex's image ships his apt repo (github.com/ak-rex/akrex-arm-repo) already
 #   configured, which is where sdrpp and the HackerGadgets AIO metapackage come
@@ -166,6 +167,21 @@ main() {
     printf '%s\n' "$content" > "$tmp"
     chmod "$mode" "$tmp"
     mv -f "$tmp" "$path"
+  }
+
+  # stdin is the script when piped from curl, so anything interactive has to
+  # talk to the controlling terminal directly. sudo keeps it, so /dev/tty is
+  # still the user's terminal here.
+  have_tty() { { : < /dev/tty; } 2>/dev/null; }
+
+  prompt_yn() {
+    local q=$1 default=${2:-n} ans="" hint="[y/N]"
+    [[ $default == y ]] && hint="[Y/n]"
+    have_tty || return 1
+    printf '  %s %s ' "$q" "$hint" > /dev/tty
+    read -r ans < /dev/tty || return 1
+    [[ -z $ans ]] && ans=$default
+    [[ $ans == [Yy]* ]]
   }
 
   pkg_installed() {
@@ -286,11 +302,34 @@ main() {
   # sudo membership are decisions this script should not be making silently.
   [[ -n $DESKTOP_USER ]] || DESKTOP_USER=$DEFAULT_USER
   if ! id -u "$DESKTOP_USER" >/dev/null 2>&1; then
-    if [[ -n ${SUDO_USER:-} ]] && id -u "$SUDO_USER" >/dev/null 2>&1; then
+    if $DRY_RUN; then
+      log "user '$DESKTOP_USER' does not exist — a real run would offer to create it"
+      if [[ -n ${SUDO_USER:-} ]] && id -u "$SUDO_USER" >/dev/null 2>&1; then
+        DESKTOP_USER=$SUDO_USER
+        log "using '$DESKTOP_USER' for the rest of this dry run"
+      else
+        die "no account to inspect for a dry run; pass --user NAME"
+      fi
+    elif have_tty && prompt_yn "User '$DESKTOP_USER' does not exist. Create it now?" y; then
+      # adduser runs against the terminal so it can do its own password
+      # prompting: no echo, confirmation, and nothing passing through this
+      # script or its output. Never accept a password as an argument here.
+      if ! adduser "$DESKTOP_USER" < /dev/tty > /dev/tty 2>&1; then
+        die "adduser failed for '$DESKTOP_USER'"
+      fi
+      if getent group sudo >/dev/null 2>&1 \
+         && prompt_yn "Add '$DESKTOP_USER' to the sudo group?" y; then
+        adduser "$DESKTOP_USER" sudo > /dev/tty 2>&1
+        log "added $DESKTOP_USER to sudo"
+      fi
+      log "created $DESKTOP_USER"
+      note "Verify you can log in as $DESKTOP_USER and that sudo works, THEN remove the image's default account (it has a publicly known password): sudo deluser --remove-home <default>"
+    elif [[ -n ${SUDO_USER:-} ]] && id -u "$SUDO_USER" >/dev/null 2>&1; then
       warn "user '$DESKTOP_USER' does not exist; falling back to '\$SUDO_USER' ($SUDO_USER)"
       DESKTOP_USER=$SUDO_USER
     else
-      die "user '$DESKTOP_USER' does not exist. Create it first:
+      die "user '$DESKTOP_USER' does not exist and there is no terminal to prompt on.
+  Create it first:
     adduser $DESKTOP_USER && adduser $DESKTOP_USER sudo
   then re-run, or pass --user NAME for a different account."
     fi

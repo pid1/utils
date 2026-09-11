@@ -14,11 +14,12 @@ curl -fsSL pid1.space/rx | sudo bash
 <details>
 <summary>If the short URL is down</summary>
 
-`pid1.space/rx` is a mirror of `setup.sh`, republished to
-`pid1.github.io` by [`publish-rx.yml`](.github/workflows/publish-rx.yml)
-on every change to this script. It can lag by a minute or two while Pages
-rebuilds, and it depends on that workflow having run. This repo is always the
-source of truth, so the raw URL is the fallback and is never stale:
+`pid1.space/rx` redirects to `rx.pid1.space`, a Cloudflare Worker that
+Cloudflare builds and deploys straight from this repository on every push to
+`main`. There is no mirror to fall out of date: if Cloudflare misses a push,
+[`cf-fallback.yml`](.github/workflows/cf-fallback.yml) notices that the live
+`/.build-id` is not the current commit and deploys it. The raw URL remains the
+fallback for when Cloudflare itself is unreachable:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/pid1/rx/main/setup.sh | sudo bash
@@ -154,8 +155,9 @@ Held by default: `akrex-kernel`, `clockworkpi-kernel`,
 
 It fetches from `pid1.space/rx`, falling back to the raw URL, and downloads to
 a file rather than piping — a truncated transfer is then caught by the same
-checks the publish workflow uses (`bash -n`, shebang, and the trailing
-`main "$@"` without which the script would parse cleanly and do nothing).
+checks [`build.sh`](build.sh) runs before publishing (`bash -n`, shebang, and
+the trailing `main "$@"` without which the script would parse cleanly and do
+nothing).
 
 ---
 

@@ -24,6 +24,13 @@ install -m 0644 "$script" dist/setup.sh
 
 # Identifies the deployed commit so the fallback workflow can tell whether
 # Cloudflare already published this tree.
-printf '%s\n' "${WORKERS_CI_COMMIT_SHA:-${GITHUB_SHA:-local}}" > dist/.build-id
+#
+# Read it from the checkout rather than the environment. Workers Builds sets
+# WORKERS_CI_COMMIT_SHA to the *branch name* for a manually started build, and
+# the fallback compares this value against github.sha -- so trusting the
+# variable would leave a deployed site permanently looking stale and make the
+# fallback redeploy on every push, which is precisely what it exists to avoid.
+sha=$(git rev-parse HEAD 2>/dev/null || echo "${WORKERS_CI_COMMIT_SHA:-${GITHUB_SHA:-local}}")
+printf '%s\n' "$sha" > dist/.build-id
 
 echo "verified and staged $(wc -l < "$script") lines"

@@ -1,0 +1,20 @@
+# rx.pid1.space -- the provisioning script, served as text/plain.
+#
+# pid1.space/rx still works: a redirect rule on the apex sends it here, and
+# the install line uses `curl -fsSL`, whose -L follows the redirect.
+#
+# Cloudflare Workers Builds deploys this on push to main. The workflow in
+# .github/workflows/cf-fallback.yml is the fallback for when that does not
+# happen, and no-ops when Cloudflare already published the commit.
+
+name = "rx"
+main = "src/index.js"
+compatibility_date = "2026-09-11"
+
+[assets]
+directory = "./dist"
+binding = "ASSETS"
+
+[[routes]]
+pattern = "rx.pid1.space"
+custom_domain = true

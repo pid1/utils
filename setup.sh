@@ -6,9 +6,9 @@
 #
 #   curl -fsSL pid1.space/rx | sudo bash
 #
-# pid1.space/rx is a mirror of this file, republished by
-# .github/workflows/publish-rx.yml. If it is stale or unreachable, the raw
-# URL is the source of truth:
+# pid1.space/rx redirects to rx.pid1.space, which Cloudflare deploys straight
+# from this repository on every push. If it is unreachable, the raw URL still
+# works:
 #
 #   curl -fsSL https://raw.githubusercontent.com/pid1/rx/main/setup.sh | sudo bash
 #
@@ -494,12 +494,13 @@ SSHDNOPW
 # Arguments pass through to setup.sh, so --only/--skip work here too.
 set -euo pipefail
 
-# Source of truth first. pid1.space/rx is a mirror republished by a workflow;
-# if that workflow ever breaks it freezes at its last successful publish and
-# keeps serving it, so preferring it here would silently apply a stale config
-# forever. It stays as the fallback for when GitHub is unreachable.
-PRIMARY=https://raw.githubusercontent.com/pid1/rx/main/setup.sh
-FALLBACK=https://pid1.space/rx
+# pid1.space/rx first. It is no longer a mirror that can silently freeze:
+# Cloudflare deploys it from the repository on push, and a push Cloudflare
+# misses is caught by .github/workflows/cf-fallback.yml, which redeploys when
+# the live /.build-id does not match the commit. The raw URL stays as the
+# fallback for when Cloudflare is unreachable.
+PRIMARY=https://pid1.space/rx
+FALLBACK=https://raw.githubusercontent.com/pid1/rx/main/setup.sh
 
 if [ "$(id -u)" -ne 0 ]; then
     echo "maint: needs root — run: sudo maint $*" >&2
@@ -549,7 +550,7 @@ if curl -fsSL --max-time 30 "$PRIMARY" -o "$tmp"; then
     src=$PRIMARY
 elif curl -fsSL --max-time 30 "$FALLBACK" -o "$tmp"; then
     src=$FALLBACK
-    echo "maint: primary unreachable, used the mirror — it may lag" >&2
+    echo "maint: pid1.space unreachable, fetched from GitHub instead" >&2
 fi
 
 if [ -s "$tmp" ]; then
